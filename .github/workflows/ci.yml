@@ -9,6 +9,14 @@ on:
   push:
     branches: [main]
 
+# PR de fonte externa (ex: Dependabot) recebe um GITHUB_TOKEN com permissão
+# mínima por padrão — sem isso, "dorny/paths-filter" falha com "Resource not
+# accessible by integration" ao tentar listar os arquivos da PR (achado
+# rodando de verdade contra PR real do Dependabot, 2026-08-07).
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   # Detecta qual serviço mudou, pra não buildar tudo a cada PR (ADR-0018).
   changes:
