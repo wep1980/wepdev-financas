@@ -1,5 +1,7 @@
 # Sistema de Finanças Pessoais
 
+[![CI](https://github.com/wep1980/wepdev-financas/actions/workflows/ci.yml/badge.svg)](https://github.com/wep1980/wepdev-financas/actions/workflows/ci.yml)
+
 Sistema de controle financeiro pessoal e multi-usuário, construído com
 arquitetura de microsserviços, usando as tecnologias mais adotadas hoje no
 mercado. Permite gerenciar contas/receitas/despesas, importar fatura de
