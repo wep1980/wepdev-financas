@@ -84,14 +84,13 @@ idempotente. Evento Kafka em `transacao.eventos`, migração Flyway, 28
 testes, imagem Docker validada. Falta editar/resumo/recorrentes (ver
 `docs/tasks.md`).
 
-Repositório git inicializado (2026-08-07), ainda sem remoto no GitHub.
-`.github/workflows/ci.yml` já escrito (build + teste + scan de
-vulnerabilidade por serviço, com path filter — ADR-0017/0018), mas só vai
-rodar de verdade quando existir repositório no GitHub. **Antes do primeiro
-PR real**, configurar o secret `NVD_API_KEY` (gratuito, ver
-[`docs/architecture/security.md`](docs/architecture/security.md)) — sem
-ele o job de scan falha. Ver [`docs/tasks.md`](docs/tasks.md) pro detalhe
-do que falta em cada item.
+Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
+(privado). CI validado rodando de verdade — `mvn test` passa nos dois
+serviços no runner hospedado. **Falta só configurar o secret `NVD_API_KEY`**
+(gratuito, gerar em https://nvd.nist.gov/developers/request-an-api-key —
+ver [`docs/architecture/security.md`](docs/architecture/security.md)) pra
+o scan de vulnerabilidade (ADR-0017) passar também. Ver
+[`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 
 `docker compose up -d --build account-service transaction-service` sobe os
 dois serviços + toda a infra (MySQL, Redis, MongoDB, Keycloak, Kafka,

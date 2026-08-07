@@ -558,3 +558,47 @@ environment.
 Criado/alterado: `docs/architecture/interfaces-graficas.md` (novo);
 `docs/postman/README.md` (reescrito); `docs/postman/financas-dev.postman_environment.json`;
 `CLAUDE.md` (mapa de docs); `README.md` (link + Prometheus na tabela).
+
+## 2026-08-07 — Conexão com o GitHub + CI validado de verdade
+
+Pedido: fazer a parte de conexão com o GitHub do usuário.
+
+`gh` CLI não estava instalado, e nem `winget`/`choco` disponíveis. O
+instalador `.msi` oficial falhou com erro 1925 (precisa de admin, sem
+elevação neste ambiente) — resolvido baixando a versão `.zip` portátil via
+PowerShell, extraindo em `%LOCALAPPDATA%\Programs\gh` (sem precisar de
+admin) e adicionando ao PATH do usuário. Login (`gh auth login`) é
+interativo (código + navegador) — o usuário rodou num terminal próprio; na
+primeira tentativa o terminal fechou antes de confirmar e o login não
+persistiu (diretório de config nem existia), refeito com sucesso na
+segunda tentativa.
+
+Repositório criado: `github.com/wep1980/wepdev-financas`, privado
+(decisão do usuário — projeto de finanças pessoais, sem motivo pra ficar
+público por padrão). Branch local renomeada de `master` pra `main` antes
+do primeiro push (nosso CI já esperava `main`, padrão atual do GitHub).
+
+Push inicial só continha o commit já existente (sem o CI, que ainda
+estava sem commitar de propósito) — commitei e subi separado o que faltava
+(CI, Dependabot, docs de interfaces/Postman) pra poder testar de verdade.
+
+**Bug real encontrado rodando no GitHub Actions** (não aparecia local):
+primeiro run falhou com `./mvnw: Permission denied` (exit 126) — Windows
+não rastreia bit de execução (`core.filemode=false` nessa máquina), então
+o `mvnw` de cada serviço foi commitado como `100644` em vez de `100755`.
+Corrigido com `git update-index --chmod=+x` nos dois `mvnw`, novo commit,
+novo push. Depois disso: **`mvn test` passou nos dois serviços de
+verdade no runner hospedado** (45 + 28 testes, Dev Services/Testcontainers
+funcionando sem configuração extra). Só o scan de vulnerabilidade falhou,
+exatamente como esperado — `Invalid API Key` por falta da `NVD_API_KEY`
+(já documentado como pendência antes mesmo de existir repositório).
+
+Efeito colateral notado: assim que `dependabot.yml` foi pro GitHub, o
+Dependabot já abriu várias PRs de atualização automaticamente (esperado) —
+essas PRs rodaram CI contra o commit anterior ao fix do `mvnw` e também
+falharam por isso; devem se resolver sozinhas quando o Dependabot
+rebasear, não é um problema novo.
+
+Criado/alterado: `.git/` (branch renomeada `master`→`main`, remoto
+`origin` configurado, 3 commits, push feito); `services/*/mvnw` (modo
+100755); `docs/tasks.md`; `README.md` (link do repo real).

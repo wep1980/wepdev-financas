@@ -262,11 +262,25 @@ Conforme `docs/specs/transaction-service.yaml` (endpoints
       `NVD_API_KEY` nos secrets do repositório antes do primeiro PR real**
       (gerar em https://nvd.nist.gov/developers/request-an-api-key).
       Documentado no inventário de credenciais (`security.md`).
-- [ ] Workflow não pôde ser validado rodando de verdade (sem remoto no
-      GitHub ainda) — validado o que dava pra validar localmente: YAML
-      sintaticamente válido, `mvn test` normal não regrediu com o plugin
-      novo no `pom.xml`, `mvn dependency-check:check` resolve e executa o
-      plugin certo. Confirmar rodando de verdade assim que existir PR real.
+- [x] **Repositório GitHub criado e conectado** —
+      `github.com/wep1980/wepdev-financas` (privado), via GitHub CLI
+      instalado sem admin (zip portátil, `.msi` pedia elevação que o
+      ambiente não tinha) — 2026-08-07.
+- [x] **CI validado rodando de verdade** no GitHub Actions (não só
+      localmente): job `changes` disparou os dois serviços corretamente
+      (path filter funcionou), `mvn test` **passou nos dois** — 45 +28
+      testes rodando no runner hospedado, incluindo Dev Services
+      (Testcontainers) pra MySQL/Kafka, sem configuração extra.
+- [x] **Bug real encontrado e corrigido**: primeiro run falhou com
+      `./mvnw: Permission denied` (exit 126) — o Windows não rastreia bit
+      de execução (`core.filemode=false`), então o `mvnw` foi commitado
+      como `100644` em vez de `100755`. Corrigido com
+      `git update-index --chmod=+x` nos dois `mvnw`.
+- [ ] **Só falta a `NVD_API_KEY`** — confirmado que o scan falha exatamente
+      como esperado (`Invalid API Key`) sem essa secret. Gerar em
+      https://nvd.nist.gov/developers/request-an-api-key e configurar em
+      Settings → Secrets and variables → Actions → New repository secret
+      no GitHub. Depois disso o CI fica 100% verde.
 
 ## Próxima fatia (preview — não detalhar ainda)
 
