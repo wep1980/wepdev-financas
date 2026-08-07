@@ -84,8 +84,14 @@ idempotente. Evento Kafka em `transacao.eventos`, migração Flyway, 28
 testes, imagem Docker validada. Falta editar/resumo/recorrentes (ver
 `docs/tasks.md`).
 
-Falta CI (`.github/workflows/ci.yml`) pros dois serviços. Ver
-[`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
+Repositório git inicializado (2026-08-07), ainda sem remoto no GitHub.
+`.github/workflows/ci.yml` já escrito (build + teste + scan de
+vulnerabilidade por serviço, com path filter — ADR-0017/0018), mas só vai
+rodar de verdade quando existir repositório no GitHub. **Antes do primeiro
+PR real**, configurar o secret `NVD_API_KEY` (gratuito, ver
+[`docs/architecture/security.md`](docs/architecture/security.md)) — sem
+ele o job de scan falha. Ver [`docs/tasks.md`](docs/tasks.md) pro detalhe
+do que falta em cada item.
 
 `docker compose up -d --build account-service transaction-service` sobe os
 dois serviços + toda a infra (MySQL, Redis, MongoDB, Keycloak, Kafka,
@@ -139,7 +145,10 @@ o próprio token do usuário repassado** — só então usa um token de serviço
 ## URLs úteis (ambiente de dev local)
 
 Depois de `docker compose up -d` (infra) + `mvn quarkus:dev` em cada
-serviço:
+serviço. Lista completa de toda interface gráfica disponível (dev **e** o
+padrão pra produção, ainda não implantado) em
+[`docs/architecture/interfaces-graficas.md`](docs/architecture/interfaces-graficas.md)
+— a tabela abaixo é só o resumo do dia a dia:
 
 | O quê | URL | Credenciais |
 |---|---|---|
@@ -153,6 +162,7 @@ serviço:
 | Keycloak (token, realm `financas`) | `http://localhost:8080/realms/financas/protocol/openid-connect/token` | ver `infra/keycloak/realm-financas.json` |
 | Grafana | `http://localhost:3001` | `admin` / `admin` |
 | Kafka UI ([kafka-ui](https://github.com/provectus/kafka-ui) — tópicos, mensagens, config) | `http://localhost:8090` | — |
+| Prometheus | `http://localhost:9090` | — |
 | MySQL (`account_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
 | Kafka (broker, ex: DBeaver/cliente Kafka) | `localhost:29092` | — |
 

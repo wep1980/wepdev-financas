@@ -1,0 +1,83 @@
+name: CI
+
+# CD (build de imagem + deploy) fica pra fatia 9 (ADR-0020/0021) — este
+# workflow só cobre build + teste + scan de vulnerabilidade (ADR-0017/0018).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # Detecta qual serviço mudou, pra não buildar tudo a cada PR (ADR-0018).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      account-service: ${{ steps.filter.outputs.account-service }}
+      transaction-service: ${{ steps.filter.outputs.transaction-service }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            account-service:
+              - 'services/account-service/**'
+            transaction-service:
+              - 'services/transaction-service/**'
+
+  account-service:
+    needs: changes
+    if: needs.changes.outputs.account-service == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/account-service
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: services/account-service/pom.xml
+      - name: Testes (unitário + integração)
+        run: ./mvnw test -B
+      # Precisa de NVD_API_KEY (secret do repo) — sem ela o NVD rejeita a
+      # sincronização com "Invalid API Key" (validado localmente,
+      # 2026-08-07). Gerar de graça em https://nvd.nist.gov/developers/request-an-api-key.
+      - name: Cache da base de dados do OWASP Dependency-Check
+        uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: dependency-check-data-${{ github.run_id }}
+          restore-keys: dependency-check-data-
+      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
+        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+
+  transaction-service:
+    needs: changes
+    if: needs.changes.outputs.transaction-service == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/transaction-service
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: services/transaction-service/pom.xml
+      - name: Testes (unitário + integração)
+        run: ./mvnw test -B
+      - name: Cache da base de dados do OWASP Dependency-Check
+        uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: dependency-check-data-${{ github.run_id }}
+          restore-keys: dependency-check-data-
+      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
+        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}

@@ -490,3 +490,71 @@ Criado/alterado: `Transacao.cancelar()`/`isCancelada()`;
 `TransacaoResource` (endpoint `DELETE`);
 `TransacaoNaoEncontradaExceptionMapper`; `docs/specs/transaction-service.yaml`
 (422 documentado no `DELETE`); `docs/tasks.md`.
+
+## 2026-08-07 — Git inicializado + CI (GitHub Actions) + Dependabot
+
+Pedido: "siga o caminho que voce achar melhor" — escolhi fechar o CI
+(adiado duas vezes já) porque 73 testes sem nenhum gate automático era a
+lacuna de maior risco nesse ponto. No caminho descobri que o projeto nunca
+tinha sido inicializado como repositório git — todo o trabalho até aqui só
+existia em disco, sem nenhum commit. Perguntei ao usuário como proceder;
+escolheu inicializar git local agora, GitHub fica pra depois.
+
+Feito: `git init` + primeiro commit (152 arquivos — conferi que nada de
+`target/`, `.env` ou segredo entrou, só `.gitignore` já existente cobrindo
+tudo). `.github/workflows/ci.yml`: job `changes` detecta path alterado
+(`dorny/paths-filter@v4`) e dispara o job do serviço certo só se ele mudou;
+cada job roda `mvn test` + `mvn dependency-check:check` (ADR-0017).
+`dependency-check-maven` declarado nos dois `pom.xml` sem `<executions>`
+(não roda no `mvn test` local, só explícito no CI). `.github/dependabot.yml`
+pra Maven/Docker/docker-compose/github-actions.
+
+Antes de fixar versões de actions/plugins, validei via busca web em vez de
+chutar (mesmo princípio de sempre confirmar antes de assumir que usei a
+sessão inteira): `dependency-check-maven` 13.0.0 (Maven Central,
+2026-08-03), `actions/checkout@v7`, `actions/setup-java@v5` (v6 ainda em
+desenvolvimento, não recomendado), `actions/cache@v6`, `dorny/paths-filter@v4`.
+
+**Achado real rodando local**: `dependency-check-maven` falhou com "Invalid
+API Key" — a NVD passou a exigir uma API key (gratuita) pra sincronizar a
+base de CVE, sem isso o scan não roda de jeito nenhum, não é só mais lento.
+Sem como testar isso de ponta a ponta sem uma chave de verdade (e sem
+repositório no GitHub pra disparar o workflow ainda), documentei o passo
+como pendência clara: configurar `NVD_API_KEY` nos secrets do GitHub antes
+do primeiro PR real, senão todo PR falha o scan.
+
+Criado/alterado: `.git/` (repo novo, commit inicial); `.github/workflows/ci.yml`;
+`.github/dependabot.yml`; `account-service/pom.xml` e
+`transaction-service/pom.xml` (plugin `dependency-check-maven`);
+`docs/architecture/security.md` (inventário: `NVD_API_KEY`); `docs/tasks.md`.
+
+## 2026-08-07 — Interfaces gráficas + guia completo do Postman
+
+Pedido: documentar Keycloak e toda interface gráfica acessível via
+Docker, tanto pra dev (ambiente atual) quanto pro padrão de produção
+futura; criar um passo a passo completo pra testar o sistema inteiro no
+Postman; e uma pergunta sobre como liberar acesso do Claude ao GitHub do
+usuário.
+
+Feito: `docs/architecture/interfaces-graficas.md` (novo) — tabela de dev
+com todas as 8 interfaces (Keycloak, Kafka UI, Grafana, Prometheus,
+Swagger/Dev UI dos dois serviços), validada subindo Prometheus/Grafana de
+verdade (nunca tinham sido ligados nessa sessão). Seção de produção usa
+placeholder de domínio (nunca dado real em arquivo versionado, regra do
+`deployment.md`) e levanta uma decisão em aberto que não tomei sozinho:
+Keycloak serve login público e console admin na mesma porta — não dá pra
+tunelar só um. Registrei 3 opções com recomendação (Cloudflare Access no
+path `/admin`), mas fica pro usuário decidir quando chegarmos na fatia 9.
+
+`docs/postman/README.md` reescrito como checklist numerado (0 a 6): subir
+infra → importar environment → importar as duas collections → token de
+usuário → token de serviço → roteiro de 9 passos que exercita os dois
+serviços de ponta a ponta (criar conta → transação → saldo mudou → cancela
+→ saldo volta → exclui conta) → tabela de erros comuns (baseada nos bugs
+reais que encontramos essa sessão: issuer do Keycloak, token expirado,
+baseUrl da collection). Adicionei `transaction_service_url` que faltava no
+environment.
+
+Criado/alterado: `docs/architecture/interfaces-graficas.md` (novo);
+`docs/postman/README.md` (reescrito); `docs/postman/financas-dev.postman_environment.json`;
+`CLAUDE.md` (mapa de docs); `README.md` (link + Prometheus na tabela).

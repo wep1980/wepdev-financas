@@ -240,11 +240,33 @@ Conforme `docs/specs/transaction-service.yaml` (endpoints
       up". Também adicionado ao realm um mapeamento de service account
       (`transaction-service` → role `service`) só pra permitir testar os
       endpoints internos antes do `transaction-service` existir de verdade.
-- [ ] `.github/workflows/ci.yml` (ADR-0018): build + testes + scan de
-      vulnerabilidade (ADR-0017) em todo PR, com path filter (só builda o
-      serviço que mudou). CD (deploy) fica pra quando chegarmos na fatia 9 —
-      não faz sentido configurar deploy antes de ter servidor de produção
-      preparado, mas o CI (sem o D) já deve rodar desde essa fatia.
+- [x] **Repositório git inicializado** — `git init` + primeiro commit
+      (152 arquivos, tudo que existia até aqui). Ainda sem remoto no
+      GitHub (usuário decide quando conectar) — 2026-08-07.
+- [x] `.github/workflows/ci.yml` (ADR-0018): job `changes` detecta path
+      alterado (`dorny/paths-filter`), dispara `account-service` e/ou
+      `transaction-service` só se o respectivo `services/*` mudou. Cada
+      job: `mvn test` (unitário + integração) + `mvn dependency-check:check`
+      (ADR-0017, scan OWASP). CD fica pra fatia 9, como já decidido.
+- [x] `dependency-check-maven` (13.0.0 — confirmado via Maven Central,
+      2026-08-07) declarado nos dois `pom.xml`, sem `<executions>` (não
+      roda em `mvn test`/`package` local, só via `mvn dependency-check:check`
+      explícito no CI — não pesa o loop de dev).
+- [x] `.github/dependabot.yml`: Maven (os dois serviços), Docker (os dois
+      Dockerfile), `docker-compose` (raiz), `github-actions` — atualização
+      semanal.
+- [x] **Achado rodando local**: `dependency-check-maven` falha com "Invalid
+      API Key" sem `NVD_API_KEY` — a NVD passou a exigir chave (gratuita)
+      pra sincronizar a base de CVE. Sem essa secret configurada no GitHub,
+      o job de scan vai falhar em todo PR — **configurar
+      `NVD_API_KEY` nos secrets do repositório antes do primeiro PR real**
+      (gerar em https://nvd.nist.gov/developers/request-an-api-key).
+      Documentado no inventário de credenciais (`security.md`).
+- [ ] Workflow não pôde ser validado rodando de verdade (sem remoto no
+      GitHub ainda) — validado o que dava pra validar localmente: YAML
+      sintaticamente válido, `mvn test` normal não regrediu com o plugin
+      novo no `pom.xml`, `mvn dependency-check:check` resolve e executa o
+      plugin certo. Confirmar rodando de verdade assim que existir PR real.
 
 ## Próxima fatia (preview — não detalhar ainda)
 
