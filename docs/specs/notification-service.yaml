@@ -1,0 +1,141 @@
+openapi: 3.0.3
+info:
+  title: Notification Service - Sistema de Finanças Pessoais
+  description: >
+    Preferências de notificação do usuário, registro de dispositivos push e
+    histórico de alertas de vencimento (despesa recorrente, fatura de
+    cartão). O disparo em si é feito por um job agendado interno (ver
+    docs/architecture/overview.md seção 5 e ADR-0010) — não exposto aqui
+    como endpoint.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8087
+paths:
+  /api/v1/preferencias-notificacao:
+    put:
+      summary: Cria ou atualiza as preferências de notificação do usuário
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreferenciaNotificacaoRequest"
+      responses:
+        "200":
+          description: Preferências salvas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PreferenciaNotificacaoResponse" }
+    get:
+      summary: Busca as preferências de notificação do usuário
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: usuarioId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Preferências do usuário (default se nunca configurou)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PreferenciaNotificacaoResponse" }
+
+  /api/v1/preferencias-notificacao/dispositivos:
+    post:
+      summary: Registra um dispositivo (token push) do usuário
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DispositivoPushRequest"
+      responses:
+        "201":
+          description: Dispositivo registrado
+    delete:
+      summary: Remove um dispositivo (ex. logout, token inválido)
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Dispositivo removido
+
+  /api/v1/alertas:
+    get:
+      summary: Histórico de alertas de vencimento enviados ao usuário
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: usuarioId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Lista de alertas enviados, mais recentes primeiro
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AlertaResponse" }
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/realms/financas/.well-known/openid-configuration
+  schemas:
+    CanalNotificacao:
+      type: string
+      enum: [PUSH, WHATSAPP, EMAIL]
+    PreferenciaNotificacaoRequest:
+      type: object
+      required: [usuarioId, canaisHabilitados, diasAntecedencia]
+      properties:
+        usuarioId: { type: string, format: uuid }
+        canaisHabilitados:
+          type: array
+          items: { $ref: "#/components/schemas/CanalNotificacao" }
+        diasAntecedencia:
+          type: integer
+          default: 3
+          description: Quantos dias antes do vencimento o alerta deve ser disparado
+        telefoneWhatsapp:
+          type: string
+          nullable: true
+          description: Obrigatório se WHATSAPP estiver em canaisHabilitados
+    PreferenciaNotificacaoResponse:
+      type: object
+      properties:
+        usuarioId: { type: string, format: uuid }
+        canaisHabilitados:
+          type: array
+          items: { $ref: "#/components/schemas/CanalNotificacao" }
+        diasAntecedencia: { type: integer }
+        telefoneWhatsapp: { type: string, nullable: true }
+        atualizadoEm: { type: string, format: date-time }
+    DispositivoPushRequest:
+      type: object
+      required: [usuarioId, token, plataforma]
+      properties:
+        usuarioId: { type: string, format: uuid }
+        token: { type: string, description: "Device token do Firebase Cloud Messaging (ADR-0011)" }
+        plataforma: { type: string, enum: [ANDROID, IOS] }
+    AlertaResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        origem: { type: string, enum: [TRANSACAO_RECORRENTE, FATURA_CARTAO] }
+        origemId: { type: string, format: uuid }
+        dataVencimento: { type: string, format: date }
+        canaisEnviados:
+          type: array
+          items: { $ref: "#/components/schemas/CanalNotificacao" }
+        enviadoEm: { type: string, format: date-time }

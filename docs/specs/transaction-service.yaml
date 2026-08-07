@@ -1,0 +1,343 @@
+openapi: 3.0.3
+info:
+  title: Transaction Service - Sistema de Finanças Pessoais
+  description: Registra transações (receitas e despesas) e reflete o efeito no saldo da conta correspondente.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8082
+paths:
+  /api/v1/transacoes:
+    post:
+      summary: >
+        Registra uma nova transação e atualiza o saldo da conta.
+        `usuarioId` não faz parte do corpo — é extraído do claim `sub` do
+        token, igual ao account-service (ADR-0003). A conta (`contaId`)
+        precisa pertencer ao usuário autenticado, validado contra o
+        account-service.
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarTransacaoRequest"
+      responses:
+        "201":
+          description: Transação registrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransacaoResponse" }
+        "400":
+          description: Campo obrigatório ausente/inválido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroValidacaoResponse" }
+        "404":
+          description: Conta não encontrada (ou não pertence ao usuário)
+        "422":
+          description: Regra de negócio violada (ex. saldo insuficiente)
+    get:
+      summary: Lista transações do usuário autenticado, opcionalmente filtradas por conta e período
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: contaId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: inicio
+          in: query
+          schema: { type: string, format: date }
+        - name: fim
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Lista de transações
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TransacaoResponse" }
+
+  /api/v1/transacoes/resumo-por-categoria:
+    get:
+      summary: >
+        Agrega gastos por categoria num período, pro usuário autenticado —
+        usado pelo dashboard web (PRD 3.7) e pela tool de IA
+        `resumo_gastos_por_categoria` (mesmo cálculo, dois consumidores).
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: inicio
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: fim
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Total gasto por categoria no período, maior primeiro
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ResumoCategoriaResponse" }
+
+  /api/v1/transacoes/{id}:
+    put:
+      summary: Edita uma transação (descrição, valor, categoria, data)
+      description: >
+        Se a transação já estava CONFIRMADA e o valor mudou, o serviço
+        reverte o efeito antigo no saldo e aplica o novo, de forma síncrona
+        com account-service (mesma lógica de consistência da criação).
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarTransacaoRequest"
+      responses:
+        "200":
+          description: Transação atualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransacaoResponse" }
+        "404":
+          description: Transação não encontrada
+        "422":
+          description: Regra de negócio violada (ex. saldo insuficiente após ajuste)
+    delete:
+      summary: >
+        Cancela uma transação (exclusão lógica; reverte efeito no saldo,
+        síncrono com account-service). Idempotente: cancelar de novo uma
+        transação já cancelada continua 204, sem reverter o saldo outra vez.
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Transação cancelada
+        "404":
+          description: Transação não encontrada (ou pertence a outro usuário)
+        "422":
+          description: >
+            Reverter uma RECEITA exige debitar de volta — falha se a conta
+            não tem mais saldo suficiente (dinheiro já usado em outro
+            lugar). Transação continua CONFIRMADA nesse caso.
+
+  /api/v1/transacoes-recorrentes:
+    post:
+      summary: >
+        Cria uma regra de transação recorrente (gera a 1ª ocorrência
+        imediatamente). `usuarioId` vem do token, igual a `/transacoes`.
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarTransacaoRecorrenteRequest"
+      responses:
+        "201":
+          description: Regra criada (e primeira ocorrência gerada)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransacaoRecorrenteResponse" }
+    get:
+      summary: Lista regras de transação recorrente do usuário autenticado
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [ATIVA, PAUSADA, CANCELADA, CONCLUIDA] }
+      responses:
+        "200":
+          description: Lista de regras recorrentes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TransacaoRecorrenteResponse" }
+
+  /api/v1/transacoes-recorrentes/proximos-vencimentos:
+    get:
+      summary: >
+        [Endpoint interno] Lista, para todos os usuários, as próximas
+        ocorrências previstas de despesas recorrentes ativas dentro da janela
+        de dias informada. Usado pelo job diário do notification-service
+        (ADR-0010) — não filtra por usuarioId porque o próprio
+        notification-service consulta preferência por usuário separadamente.
+      security: [{ oidc: [service] }]
+      parameters:
+        - name: dias
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Janela de antecedência em dias (ex. 7 = tudo que vence nos próximos 7 dias)
+      responses:
+        "200":
+          description: Próximos vencimentos previstos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProximoVencimentoResponse" }
+
+  /api/v1/transacoes-recorrentes/{id}:
+    get:
+      summary: Busca uma regra recorrente pelo id
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Regra encontrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransacaoRecorrenteResponse" }
+        "404":
+          description: Regra não encontrada
+    delete:
+      summary: Cancela uma regra recorrente (exclusão lógica; não afeta ocorrências já geradas)
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Regra cancelada
+        "404":
+          description: Regra não encontrada
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/realms/financas/.well-known/openid-configuration
+  schemas:
+    CriarTransacaoRequest:
+      type: object
+      required: [contaId, descricao, valor, tipo]
+      properties:
+        contaId: { type: string, format: uuid }
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+        tipo: { type: string, enum: [RECEITA, DESPESA] }
+        categoria: { type: string }
+        dataTransacao: { type: string, format: date }
+    TransacaoResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contaId: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+        tipo: { type: string }
+        categoria: { type: string }
+        dataTransacao: { type: string, format: date }
+        status: { type: string, enum: [PENDENTE, CONFIRMADA, CANCELADA] }
+        transacaoRecorrenteId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Preenchido quando a transação foi gerada por uma regra recorrente (ver /transacoes-recorrentes)
+        criadoEm: { type: string, format: date-time }
+
+    AtualizarTransacaoRequest:
+      type: object
+      description: >
+        Campos editáveis de uma transação. contaId e tipo não são editáveis
+        aqui de propósito — trocar de conta/tipo é cancelar e recriar, evita
+        ambiguidade de reversão de saldo entre contas diferentes.
+      properties:
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+        categoria: { type: string }
+        dataTransacao: { type: string, format: date }
+
+    ResumoCategoriaResponse:
+      type: object
+      properties:
+        categoria: { type: string }
+        totalGasto: { type: number, format: decimal }
+        percentualDoTotal: { type: number, format: decimal }
+        totalGastoPeriodoAnterior:
+          type: number
+          format: decimal
+          nullable: true
+          description: Mesmo intervalo de dias, imediatamente anterior ao período consultado
+
+    CriarTransacaoRecorrenteRequest:
+      type: object
+      required: [contaId, descricao, valor, tipo, frequencia, dataInicio]
+      properties:
+        contaId: { type: string, format: uuid }
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+        tipo: { type: string, enum: [RECEITA, DESPESA] }
+        categoria: { type: string }
+        frequencia:
+          type: string
+          enum: [MENSAL]
+          description: Só MENSAL no v1; enum aberto pra evoluir (SEMANAL, ANUAL) sem quebrar contrato
+        dataInicio: { type: string, format: date }
+        quantidadeOcorrencias:
+          type: integer
+          nullable: true
+          description: Número fixo de ocorrências (ex. 24). Omitido/null = indefinida, repete até o usuário cancelar (ex. salário mensal)
+    TransacaoRecorrenteResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contaId: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+        tipo: { type: string }
+        categoria: { type: string }
+        frequencia: { type: string }
+        dataInicio: { type: string, format: date }
+        quantidadeOcorrencias: { type: integer, nullable: true }
+        ocorrenciasGeradas: { type: integer }
+        status: { type: string, enum: [ATIVA, PAUSADA, CANCELADA, CONCLUIDA] }
+        criadoEm: { type: string, format: date-time }
+
+    ProximoVencimentoResponse:
+      type: object
+      properties:
+        transacaoRecorrenteId: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+        dataVencimentoPrevista: { type: string, format: date }
+
+    ErroResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+    ErroValidacaoResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+        erros:
+          type: array
+          items:
+            type: object
+            properties:
+              campo: { type: string }
+              mensagem: { type: string }

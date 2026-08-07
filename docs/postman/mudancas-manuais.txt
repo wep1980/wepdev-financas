@@ -1,0 +1,150 @@
+MUDANÇAS MANUAIS NO POSTMAN — account-service e transaction-service
+====================================================================
+
+Este arquivo existe porque a collection do Postman NÃO é reimportada a
+cada mudança de contrato (o usuário já personalizou a collection importada
+e não quer perder isso). Toda vez que um endpoint mudar, atualize a
+collection manualmente seguindo as instruções abaixo E atualize este
+arquivo na mesma sessão — não deixar acumular mudança sem registrar.
+
+Fonte de verdade do contrato: docs/specs/account-service.yaml e
+docs/specs/transaction-service.yaml (spec-driven). Este arquivo é só um
+guia de "o que mexer na collection à mão".
+
+
+------------------------------------------------------------
+1. VARIÁVEIS DE ENVIRONMENT (confira se já existem)
+------------------------------------------------------------
+
+Variável                          | Valor                  | Tipo
+-----------------------------------|-------------------------|--------
+keycloak_service_client_id        | transaction-service     | default
+keycloak_service_client_secret    | changeit                | secret
+
+Necessário só se for testar os endpoints internos (/debitos, /creditos)
+com role "service" antes do transaction-service existir de verdade.
+
+
+------------------------------------------------------------
+2026-08-07 — CRUD completo + usuarioId do token (não mais do cliente)
+------------------------------------------------------------
+
+MUDANÇA DE CONTRATO (breaking change) em requests que já existiam:
+
+POST /api/v1/contas
+  - Remover "usuarioId" do body. O dono da conta agora é sempre extraído
+    do token (claim sub), nunca enviado pelo cliente.
+  - Body novo:
+    {
+      "nome": "Conta corrente",
+      "tipo": "CORRENTE",
+      "saldoInicial": 100.00,
+      "instituicao": "Banco X"
+    }
+  - Se "usuarioId" for enviado mesmo assim, é ignorado (não existe mais
+    no schema, não dá erro).
+
+GET /api/v1/contas
+  - Remover o query param "usuarioId". URL passa a ser só
+    {{baseUrl}}/api/v1/contas (sem parâmetro) — lista as contas do
+    usuário do token automaticamente.
+
+GET /api/v1/contas/{id}
+  - Sem mudança de request. Mudou o comportamento: conta de outro
+    usuário agora responde 404 (antes não tinha essa checagem).
+
+REQUESTS NOVOS PRA CRIAR NA COLLECTION:
+
+PUT /api/v1/contas/{id} — atualizar conta
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Header: Content-Type: application/json
+  - Body (raw JSON):
+    {
+      "nome": "Nome novo",
+      "instituicao": "Banco Y"
+    }
+  - Respostas: 200 (atualizado) / 400 (nome ausente/vazio) /
+    404 (não existe ou não é sua)
+
+DELETE /api/v1/contas/{id} — excluir (lógico) conta
+  - Auth: OAuth 2.0, mesmo token de usuário
+  - Sem body
+  - Respostas: 204 (sucesso, sem corpo) / 404 (não existe ou não é sua)
+
+FORMATO DE ERRO MUDOU (útil se tiver test scripts com pm.test checando
+corpo de erro):
+
+  404 / 422 (conta não encontrada, saldo insuficiente):
+    { "mensagem": "Conta não encontrada: <id>" }
+
+  400 (validação de campo, ex: nome ausente):
+    {
+      "mensagem": "Erro de validação",
+      "erros": [
+        { "campo": "nome", "mensagem": "não deve estar em branco" }
+      ]
+    }
+
+Se havia test script checando status/corpo dos erros antigos, ajustar pra
+essa estrutura.
+
+
+------------------------------------------------------------
+2026-08-07 — transaction-service: registrar transação (endpoint novo)
+------------------------------------------------------------
+
+Serviço novo, porta 8082. Se ainda não tem uma collection pra ele, importe
+de http://localhost:8082/q/openapi (com o serviço rodando) — é a primeira
+vez, então reimportar não perde nada (ver seção 2 do README principal do
+Postman). Depois disso, siga este arquivo pra mudanças futuras, mesmo
+esquema do account-service.
+
+POST /api/v1/transacoes — registrar transação
+  - Auth: OAuth 2.0, token de usuário (role "usuario") — mesmo token
+    usado no account-service, mesmo usuário.
+  - Header: Content-Type: application/json
+  - Body (raw JSON):
+    {
+      "contaId": "<uuid de uma conta sua, já criada no account-service>",
+      "descricao": "Mercado",
+      "valor": 120.00,
+      "tipo": "DESPESA",
+      "categoria": "Alimentação",
+      "dataTransacao": "2026-08-07"
+    }
+    (tipo: RECEITA ou DESPESA; categoria e dataTransacao são opcionais —
+    dataTransacao omitida usa a data de hoje)
+  - Respostas: 201 (criada, status vem sempre CONFIRMADA) /
+    400 (campo obrigatório ausente) /
+    404 (contaId não existe ou não é sua) /
+    422 (saldo insuficiente, só pra DESPESA)
+  - Importante: o account-service precisa estar rodando também — este
+    endpoint chama ele de forma síncrona antes de salvar a transação.
+
+GET /api/v1/transacoes — listar transações
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Query params opcionais:
+    contaId=<uuid>   (filtra por conta)
+    inicio=2026-08-01   (data, formato AAAA-MM-DD)
+    fim=2026-08-31
+  - Resposta: 200, lista de transações do usuário autenticado, mais
+    recente primeiro. Sem os params, traz tudo do usuário.
+
+
+------------------------------------------------------------
+2026-08-07 — transaction-service: cancelar transação (endpoint novo)
+------------------------------------------------------------
+
+DELETE /api/v1/transacoes/{id} — cancelar transação
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. {id} é o "id" que veio na resposta do POST /transacoes.
+  - Reverte o efeito no saldo (síncrono com account-service): cancelar uma
+    DESPESA credita de volta, cancelar uma RECEITA debita de volta.
+  - Respostas: 204 (cancelada, sem corpo) /
+    404 (não existe ou não é sua) /
+    422 (não deu pra reverter — ex: cancelar uma RECEITA cujo dinheiro já
+    foi gasto em outro lugar, a conta não tem mais saldo suficiente)
+  - Idempotente: chamar de novo numa transação já cancelada continua 204,
+    sem reverter o saldo outra vez.
+  - Importante: o account-service precisa estar rodando também, mesmo
+    motivo do POST.

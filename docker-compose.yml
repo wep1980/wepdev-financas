@@ -1,0 +1,179 @@
+# Valores de MYSQL_ROOT_PASSWORD etc. abaixo têm default de DEV (ver
+# .env.example) — só pra rodar local sem setup extra. Nunca usados em
+# produção nesse formato; ver docs/architecture/security.md.
+version: "3.9"
+
+networks:
+  financas-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  mongo-data:
+  keycloak-data:
+
+services:
+
+  # ================= Bancos de dados =================
+  mysql:
+    image: mysql:8.4
+    container_name: financas-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_USER: ${MYSQL_USER:-financas}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-financas}
+      MYSQL_DATABASE: account_db
+    ports:
+      # 3307 no host (não 3306) — já existe um MySQL local rodando na sua
+      # máquina fora do Docker; dentro da rede Docker os serviços continuam
+      # falando "mysql:3306" normalmente, só o acesso pelo host muda.
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./infra/mysql/init:/docker-entrypoint-initdb.d
+    networks: [financas-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: financas-redis
+    ports:
+      - "6379:6379"
+    networks: [financas-net]
+
+  mongo:
+    image: mongo:7
+    container_name: financas-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-financas}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-financas}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks: [financas-net]
+
+  # ================= Identidade =================
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: financas-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_DB: dev-file
+      # Fixa o "issuer" de todo token emitido, não importa se quem pediu
+      # foi um humano via localhost:8080 ou um container via rede interna
+      # (keycloak:8080) — sem isso, cada lado vê um issuer diferente e a
+      # validação de token rejeita com 401 (ver account-service e
+      # transaction-service application.properties, que compensam o
+      # discovery document também virar "localhost" com discovery-enabled=false).
+      KC_HOSTNAME: localhost
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/keycloak/realm-financas.json:/opt/keycloak/data/import/realm-financas.json
+      - keycloak-data:/opt/keycloak/data
+    networks: [financas-net]
+
+  # ================= Mensageria =================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: financas-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks: [financas-net]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: financas-kafka
+    depends_on: [zookeeper]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "29092:29092"
+    networks: [financas-net]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: financas-kafka-ui
+    depends_on: [kafka]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: financas
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8090:8080"
+    networks: [financas-net]
+
+  # ================= Observabilidade =================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: financas-prometheus
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks: [financas-net]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: financas-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    networks: [financas-net]
+
+  # ================= Microsserviços =================
+  account-service:
+    build:
+      context: ./services/account-service
+      dockerfile: src/main/docker/Dockerfile.jvm
+    container_name: financas-account-service
+    depends_on:
+      mysql: { condition: service_healthy }
+      kafka: { condition: service_started }
+      keycloak: { condition: service_started }
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/account_db
+      DB_USER: ${MYSQL_USER:-financas}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-financas}
+      REDIS_URL: redis://redis:6379
+      KAFKA_BOOTSTRAP: kafka:9092
+      KEYCLOAK_URL: http://keycloak:8080
+      OTEL_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8081:8081"
+    networks: [financas-net]
+
+  transaction-service:
+    build:
+      context: ./services/transaction-service
+      dockerfile: src/main/docker/Dockerfile.jvm
+    container_name: financas-transaction-service
+    depends_on:
+      mysql: { condition: service_healthy }
+      kafka: { condition: service_started }
+      account-service: { condition: service_started }
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/transaction_db
+      DB_USER: ${MYSQL_USER:-financas}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-financas}
+      KAFKA_BOOTSTRAP: kafka:9092
+      KEYCLOAK_URL: http://keycloak:8080
+      TRANSACTION_SERVICE_CLIENT_SECRET: ${TRANSACTION_SERVICE_CLIENT_SECRET:-changeit}
+      ACCOUNT_SERVICE_URL: http://account-service:8081
+      OTEL_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8082:8082"
+    networks: [financas-net]

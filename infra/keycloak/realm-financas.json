@@ -1,0 +1,69 @@
+{
+  "realm": "financas",
+  "enabled": true,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      { "name": "usuario", "description": "Usuário final do sistema de finanças" },
+      { "name": "admin", "description": "Administrador do sistema" },
+      { "name": "service", "description": "Comunicação serviço-a-serviço (client credentials)" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "account-service",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "changeit",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "bearerOnly": false
+    },
+    {
+      "clientId": "transaction-service",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "changeit",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "bearerOnly": false
+    },
+    {
+      "clientId": "web-app",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000"]
+    },
+    {
+      "clientId": "mobile-app",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["financas://callback"]
+    }
+  ],
+  "users": [
+    {
+      "username": "usuario.teste",
+      "enabled": true,
+      "email": "usuario.teste@financas.local",
+      "emailVerified": true,
+      "firstName": "Usuario",
+      "lastName": "Teste",
+      "credentials": [{ "type": "password", "value": "financas123", "temporary": false }],
+      "realmRoles": ["usuario"]
+    },
+    {
+      "username": "service-account-transaction-service",
+      "enabled": true,
+      "serviceAccountClientId": "transaction-service",
+      "realmRoles": ["service"]
+    }
+  ]
+}

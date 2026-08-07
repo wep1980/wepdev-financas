@@ -1,0 +1,176 @@
+# Sistema de Finanças Pessoais
+
+Sistema de controle financeiro pessoal e multi-usuário, construído com
+arquitetura de microsserviços, usando as tecnologias mais adotadas hoje no
+mercado. Permite gerenciar contas/receitas/despesas, importar fatura de
+cartão e extrato bancário automaticamente (PDF/CSV), e conversar com uma IA
+em linguagem natural sobre a própria situação financeira (ex: "quanto tenho
+disponível pra gastar esse mês?"). Projeto desenvolvido de forma incremental,
+por fatias verticais de funcionalidade, com engenharia de software assistida
+por IA (specs, ADRs, roadmap e tasks como fonte da verdade — ver abaixo).
+
+> **Contexto para trabalhar neste repo com IA:** leia [`CLAUDE.md`](CLAUDE.md)
+> primeiro — é o índice de toda a documentação viva do projeto (produto,
+> arquitetura, decisões, roadmap, tarefas). Este README é só a porta de
+> entrada rápida.
+
+## Stack
+
+- **Back-end**: Java 21 + Quarkus
+- **Front-end web**: Next.js (React) — App Router também assume o papel de BFF (ver [ADR-0006](docs/architecture/adr/0006-nextjs-frontend-bff.md))
+- **Mobile**: React Native
+- **Bancos de dados**: MySQL (dados transacionais), Redis (cache), MongoDB
+  (dados não estruturados: logs, notificações, histórico de IA)
+- **Mensageria**: Apache Kafka
+- **Identidade**: Keycloak (OAuth2/OIDC)
+- **Segredos**: HashiCorp Vault (entra em fase posterior)
+- **Observabilidade**: Prometheus, Grafana, OpenTelemetry
+- **Orquestração/deploy**: Docker Compose (dev e produção, dados/infra) +
+  [Kamal](https://kamal-deploy.org/) pros serviços de aplicação em produção
+  (zero-downtime, rollback automático — [ADR-0021](docs/architecture/adr/0021-deploy-kamal.md)).
+  **Não** usamos Kubernetes/Helm/Terraform/ArgoCD — produção é um servidor
+  Linux único do usuário, não um cluster ([ADR-0016](docs/architecture/adr/0016-topologia-producao-servidor-unico.md));
+  essas ferramentas viram evolução condicional, não padrão (ver `docs/roadmap.md` #9)
+- **Ingress (produção)**: Cloudflare Tunnel, sem porta pública aberta ([ADR-0019](docs/architecture/adr/0019-ingress-cloudflare-tunnel.md))
+- **CI/CD**: GitHub Actions — CI em runner hospedado, deploy via runner
+  self-hosted no próprio servidor ([ADR-0020](docs/architecture/adr/0020-deploy-runner-self-hosted.md))
+- **IA**: agentes, RAG e MCP (Model Context Protocol) para interação em
+  linguagem natural com o sistema; provedor de LLM plugável (OpenAI ou Ollama,
+  ver [ADR-0002](docs/architecture/adr/0002-abstracao-provedor-llm.md));
+  Qdrant como vector store (proposto, [ADR-0005](docs/architecture/adr/0005-vector-store-qdrant.md))
+
+## Arquitetura
+
+Microsserviços organizados por domínio, cada um com seu próprio banco
+(*database-per-service*), comunicação síncrona via REST para operações que
+precisam de resposta imediata, e eventos assíncronos via Kafka para
+integração entre domínios. Detalhe completo, incluindo lista de serviços
+planejados e fluxos, em [`docs/architecture/overview.md`](docs/architecture/overview.md).
+Diagramas (contexto, containers, modelo de domínio, classes, implantação) em
+[`docs/architecture/diagrams.md`](docs/architecture/diagrams.md).
+
+```
+wepdev-financas/
+├── CLAUDE.md                   # índice da documentação viva do projeto
+├── docker-compose.yml          # infraestrutura completa para desenvolvimento local
+├── docs/
+│   ├── product/prd.md          # visão, personas, casos de uso, requisitos
+│   ├── architecture/           # overview, diagramas, estratégia de IA, testes, ADRs
+│   ├── specs/                  # contratos OpenAPI de cada serviço (spec-driven)
+│   ├── postman/                # environment e guia de teste manual via Postman
+│   ├── roadmap.md              # fatias verticais, em ordem, com status
+│   ├── tasks.md                # backlog detalhado da fatia atual
+│   └── historico.md            # log cronológico do que já foi pedido/decidido
+├── infra/keycloak/             # realm pré-configurado (roles, clients, usuário de teste)
+└── services/
+    ├── account-service/        # Quarkus — contas financeiras (ver seção Endpoints abaixo)
+    └── transaction-service/    # Quarkus — transações, chama account-service síncrono
+```
+
+### Estado atual
+
+**`account-service`** está com CRUD completo: criar/listar/buscar/atualizar/
+excluir conta (exclusão lógica), débito e crédito de saldo (endpoint interno
+pro `transaction-service` consumir), Bean Validation com erro estruturado,
+`usuarioId` sempre extraído do token (nunca aceito do cliente — fecha um
+IDOR real), evento Kafka em criação, migração Flyway, 45 testes (domínio +
+use case + integração `@QuarkusTest`), imagem Docker validada.
+
+**`transaction-service`** registra, lista e cancela transação, funcionando
+ponta a ponta: registrar/cancelar chamam o `account-service` de forma
+síncrona (débito/crédito, e o inverso ao cancelar) antes de mudar o próprio
+estado (sem transação "fantasma" se a chamada falhar); cancelar é
+idempotente. Evento Kafka em `transacao.eventos`, migração Flyway, 28
+testes, imagem Docker validada. Falta editar/resumo/recorrentes (ver
+`docs/tasks.md`).
+
+Falta CI (`.github/workflows/ci.yml`) pros dois serviços. Ver
+[`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
+
+`docker compose up -d --build account-service transaction-service` sobe os
+dois serviços + toda a infra (MySQL, Redis, MongoDB, Keycloak, Kafka,
+Prometheus, Grafana) do zero, com autenticação de verdade funcionando —
+validado ponta a ponta (criar conta → registrar transação → saldo
+atualizado, via containers). Pra desenvolvimento do dia a dia, mais rápido
+rodar só a infra via compose e os serviços em `mvn quarkus:dev` local (ver
+README de cada serviço).
+
+## Endpoints principais (`account-service`, porta `8081`)
+
+Contrato completo, com schemas de request/response, em
+[`docs/specs/account-service.yaml`](docs/specs/account-service.yaml) — a
+tabela abaixo é só um resumo de navegação.
+
+| Método | Path | Role (OIDC) | O que faz |
+|---|---|---|---|
+| `POST` | `/api/v1/contas` | `usuario` | Cria conta financeira (dono = usuário do token) |
+| `GET` | `/api/v1/contas` | `usuario` | Lista contas ativas do usuário autenticado |
+| `GET` | `/api/v1/contas/{id}` | `usuario` | Busca conta por id (404 se não existir ou não for sua) |
+| `PUT` | `/api/v1/contas/{id}` | `usuario` | Atualiza nome/instituição (404 se não for sua) |
+| `DELETE` | `/api/v1/contas/{id}` | `usuario` | Exclui logicamente (inativa; 404 se não for sua) |
+| `POST` | `/api/v1/contas/{id}/debitos` | `service` | **Interno** — debita saldo (422 se insuficiente); chamado pelo `transaction-service` |
+| `POST` | `/api/v1/contas/{id}/creditos` | `service` | **Interno** — credita saldo; chamado pelo `transaction-service` |
+
+`usuarioId` nunca é um parâmetro de request — é sempre extraído do claim
+`sub` do token (dono do recurso = quem está autenticado). Conta de outro
+usuário responde 404, igual a não existir, pra não confirmar existência a
+quem não é dono (evita IDOR). Role `usuario` é do usuário final (login
+normal); role `service` é só pra comunicação serviço-a-serviço via client
+credentials, nunca exposta ao front-end (multi-tenancy e roles detalhados
+em [ADR-0003](docs/architecture/adr/0003-multi-tenancy-keycloak.md)).
+
+## Endpoints principais (`transaction-service`, porta `8082`)
+
+Contrato completo em [`docs/specs/transaction-service.yaml`](docs/specs/transaction-service.yaml).
+
+| Método | Path | Role (OIDC) | O que faz |
+|---|---|---|---|
+| `POST` | `/api/v1/transacoes` | `usuario` | Registra transação (receita/despesa) — chama o `account-service` de forma síncrona antes de persistir; 404 se a conta não for sua, 422 se saldo insuficiente |
+| `GET` | `/api/v1/transacoes` | `usuario` | Lista transações do usuário autenticado — filtros opcionais `contaId`, `inicio`, `fim` |
+| `DELETE` | `/api/v1/transacoes/{id}` | `usuario` | Cancela (exclusão lógica) e reverte o efeito no saldo; idempotente; 404 se não for sua; 422 se não der pra reverter (saldo insuficiente) |
+
+`usuarioId` também vem sempre do token, mesmo padrão do `account-service`.
+Antes de debitar/creditar, o `transaction-service` confirma que a conta
+pertence ao usuário chamando `GET /contas/{id}` do `account-service` **com
+o próprio token do usuário repassado** — só então usa um token de serviço
+(client credentials) pra aplicar o ajuste no endpoint interno. Detalhe em
+[`services/transaction-service/README.md`](services/transaction-service/README.md).
+
+## URLs úteis (ambiente de dev local)
+
+Depois de `docker compose up -d` (infra) + `mvn quarkus:dev` em cada
+serviço:
+
+| O quê | URL | Credenciais |
+|---|---|---|
+| `account-service` (REST) | `http://localhost:8081` | token OIDC, ver abaixo |
+| `account-service` — Swagger UI | `http://localhost:8081/q/swagger-ui` | — |
+| `account-service` — OpenAPI (importar no Postman) | `http://localhost:8081/q/openapi` | — |
+| `account-service` — health | `http://localhost:8081/q/health` | — |
+| `transaction-service` (REST) | `http://localhost:8082` | token OIDC, ver abaixo |
+| `transaction-service` — Swagger UI | `http://localhost:8082/q/swagger-ui` | — |
+| Keycloak (admin console) | `http://localhost:8080` | `admin` / `admin` |
+| Keycloak (token, realm `financas`) | `http://localhost:8080/realms/financas/protocol/openid-connect/token` | ver `infra/keycloak/realm-financas.json` |
+| Grafana | `http://localhost:3001` | `admin` / `admin` |
+| Kafka UI ([kafka-ui](https://github.com/provectus/kafka-ui) — tópicos, mensagens, config) | `http://localhost:8090` | — |
+| MySQL (`account_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
+| Kafka (broker, ex: DBeaver/cliente Kafka) | `localhost:29092` | — |
+
+Todas as credenciais acima são só de dev, nunca as mesmas em produção (ver
+[`docs/architecture/security.md`](docs/architecture/security.md)). Guia
+completo de teste manual (Postman, fluxo de token `usuario` e `service`) em
+[`docs/postman/README.md`](docs/postman/README.md).
+
+## Diagramas
+
+Vivos em [`docs/architecture/diagrams.md`](docs/architecture/diagrams.md) —
+contexto, containers/serviços, modelo de domínio, **diagrama de classes**
+(atualizado junto com cada classe de domínio nova) e implantação em
+produção. Prévia publicada dos diagramas de classe atuais (`Conta` e
+`Transacao`): https://claude.ai/code/artifact/9dc61745-3325-4874-b9f5-589126f57b00
+
+## Roadmap
+
+Fatias verticais, em ordem, com status — ver
+[`docs/roadmap.md`](docs/roadmap.md). Trabalho detalhado da fatia atual em
+[`docs/tasks.md`](docs/tasks.md).

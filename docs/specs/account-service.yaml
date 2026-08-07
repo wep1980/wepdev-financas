@@ -1,0 +1,221 @@
+openapi: 3.0.3
+info:
+  title: Account Service - Sistema de Finanças Pessoais
+  description: Gerencia contas financeiras do usuário (corrente, poupança, carteira, cartão de crédito).
+  version: 1.0.0
+servers:
+  - url: http://localhost:8081
+paths:
+  /api/v1/contas:
+    post:
+      summary: >
+        Cria uma nova conta financeira. `usuarioId` não faz parte do corpo —
+        é extraído do claim `sub` do token (dono é sempre quem está
+        autenticado, nunca um valor enviado pelo cliente; ver ADR-0003).
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarContaRequest"
+      responses:
+        "201":
+          description: Conta criada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContaResponse"
+        "400":
+          description: Campo obrigatório ausente/inválido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroValidacaoResponse" }
+    get:
+      summary: Lista as contas ativas do usuário autenticado (usuarioId vem do token, não é parâmetro)
+      security: [{ oidc: [usuario] }]
+      responses:
+        "200":
+          description: Lista de contas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ContaResponse" }
+  /api/v1/contas/{id}:
+    get:
+      summary: >
+        Busca uma conta pelo id. Conta de outro usuário responde 404 (igual
+        a não existir) — nunca 403, pra não confirmar a quem não é dono que
+        aquele id existe.
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Conta encontrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContaResponse" }
+        "404":
+          description: Conta não encontrada (ou pertence a outro usuário)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroResponse" }
+    put:
+      summary: Atualiza nome/instituição de uma conta (tipo, saldo e usuarioId não são editáveis por aqui)
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarContaRequest"
+      responses:
+        "200":
+          description: Conta atualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContaResponse" }
+        "400":
+          description: Campo obrigatório ausente/inválido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroValidacaoResponse" }
+        "404":
+          description: Conta não encontrada (ou pertence a outro usuário)
+    delete:
+      summary: >
+        Exclui (logicamente) uma conta — marca como inativa, nunca apaga a
+        linha (histórico financeiro é auditável, CLAUDE.md princípio 5).
+        Idempotente: excluir de novo uma conta já inativa continua 204.
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Conta inativada
+        "404":
+          description: Conta não encontrada (ou pertence a outro usuário)
+
+  /api/v1/contas/{id}/debitos:
+    post:
+      summary: >
+        [Endpoint interno] Debita valor do saldo da conta. Chamado
+        sincronamente pelo `transaction-service` ao registrar uma despesa
+        (ver ADR-0003) — nunca exposto ao front-end.
+      security: [{ oidc: [service] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AjusteSaldoRequest"
+      responses:
+        "200":
+          description: Saldo debitado, conta atualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContaResponse" }
+        "404":
+          description: Conta não encontrada
+        "422":
+          description: Saldo insuficiente
+
+  /api/v1/contas/{id}/creditos:
+    post:
+      summary: >
+        [Endpoint interno] Credita valor no saldo da conta. Chamado
+        sincronamente pelo `transaction-service` ao registrar uma receita
+        (ver ADR-0003) — nunca exposto ao front-end.
+      security: [{ oidc: [service] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AjusteSaldoRequest"
+      responses:
+        "200":
+          description: Saldo creditado, conta atualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContaResponse" }
+        "404":
+          description: Conta não encontrada
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/realms/financas/.well-known/openid-configuration
+  schemas:
+    CriarContaRequest:
+      type: object
+      required: [nome, tipo]
+      properties:
+        nome: { type: string }
+        tipo:
+          type: string
+          enum: [CORRENTE, POUPANCA, CARTEIRA, CARTAO_CREDITO, INVESTIMENTO]
+        saldoInicial: { type: number, format: decimal }
+        instituicao: { type: string }
+    AtualizarContaRequest:
+      type: object
+      required: [nome]
+      properties:
+        nome: { type: string }
+        instituicao: { type: string }
+    ContaResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        nome: { type: string }
+        tipo: { type: string }
+        saldo: { type: number, format: decimal }
+        instituicao: { type: string }
+        ativa: { type: boolean }
+        criadoEm: { type: string, format: date-time }
+        atualizadoEm: { type: string, format: date-time }
+    AjusteSaldoRequest:
+      type: object
+      required: [valor]
+      properties:
+        valor: { type: number, format: decimal, minimum: 0, exclusiveMinimum: true }
+    ErroResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+    ErroValidacaoResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+        erros:
+          type: array
+          items:
+            type: object
+            properties:
+              campo: { type: string }
+              mensagem: { type: string }

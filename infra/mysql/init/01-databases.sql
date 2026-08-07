@@ -1,0 +1,3 @@
+CREATE DATABASE IF NOT EXISTS transaction_db CHARACTER SET utf8mb4;
+GRANT ALL PRIVILEGES ON transaction_db.* TO 'financas'@'%';
+FLUSH PRIVILEGES;

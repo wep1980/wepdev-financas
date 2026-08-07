@@ -1,0 +1,32 @@
+# Segredos — nunca versionar
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+
+# IDE
+.idea/
+.vscode/
+
+# Configuração local do Claude Code (pessoal, não compartilhada)
+.claude/settings.local.json
+
+# Java / Maven / Quarkus
+target/
+*.class
+.mvn/wrapper/maven-wrapper.jar
+
+# Node / React / Next.js / React Native
+node_modules/
+.next/
+dist/
+build/
+.expo/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
