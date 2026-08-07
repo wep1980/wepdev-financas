@@ -271,16 +271,29 @@ Conforme `docs/specs/transaction-service.yaml` (endpoints
       (path filter funcionou), `mvn test` **passou nos dois** — 45 +28
       testes rodando no runner hospedado, incluindo Dev Services
       (Testcontainers) pra MySQL/Kafka, sem configuração extra.
-- [x] **Bug real encontrado e corrigido**: primeiro run falhou com
+- [x] **Bug real #1 encontrado e corrigido**: primeiro run falhou com
       `./mvnw: Permission denied` (exit 126) — o Windows não rastreia bit
       de execução (`core.filemode=false`), então o `mvnw` foi commitado
       como `100644` em vez de `100755`. Corrigido com
       `git update-index --chmod=+x` nos dois `mvnw`.
-- [ ] **Só falta a `NVD_API_KEY`** — confirmado que o scan falha exatamente
-      como esperado (`Invalid API Key`) sem essa secret. Gerar em
+- [x] **Bug real #2 encontrado e corrigido, contra PR real do Dependabot**:
+      `dorny/paths-filter` falhava com "Resource not accessible by
+      integration" em toda PR do Dependabot — PR de fonte externa recebe
+      `GITHUB_TOKEN` com permissão mínima por padrão (proteção do GitHub
+      contra supply-chain attack via bot). Corrigido com bloco
+      `permissions: contents: read, pull-requests: read` explícito no
+      workflow. Validado: as 9 PRs que o Dependabot abriu automaticamente
+      (assim que `dependabot.yml` foi pro ar) passaram a rodar `changes` +
+      `Testes` com sucesso depois da correção (`@dependabot rebase` pra
+      forçar re-teste).
+- [ ] **Só falta a `NVD_API_KEY`** — confirmado, contra PR real também, que
+      o scan falha exatamente como esperado (`Invalid API Key`) sem essa
+      secret, depois de tudo mais (`changes`, `Testes`) passar. Essa parte
+      só o usuário pode fazer (cadastro pessoal na NVD): gerar em
       https://nvd.nist.gov/developers/request-an-api-key e configurar em
       Settings → Secrets and variables → Actions → New repository secret
-      no GitHub. Depois disso o CI fica 100% verde.
+      no GitHub (ou me passar o valor que eu configuro via `gh secret set`).
+      Depois disso o CI fica 100% verde.
 
 ## Próxima fatia (preview — não detalhar ainda)
 

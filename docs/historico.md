@@ -602,3 +602,35 @@ rebasear, não é um problema novo.
 Criado/alterado: `.git/` (branch renomeada `master`→`main`, remoto
 `origin` configurado, 3 commits, push feito); `services/*/mvnw` (modo
 100755); `docs/tasks.md`; `README.md` (link do repo real).
+
+## 2026-08-07 — Segundo bug do CI (achado contra PR real do Dependabot) + limpeza
+
+Pedido: "vamos resolver essa parte do github, tudo que você conseguir
+fazer, faça — o que você não conseguir me diga passo a passo."
+
+Fiz sozinho, sem precisar do usuário: pedi `@dependabot rebase` nas 9 PRs
+que o Dependabot já tinha aberto sozinho (pra tirar o X vermelho causado
+pelo bug do `mvnw` da sessão anterior); adicionei badge de status do CI no
+`README.md`.
+
+No processo de rebasear as PRs, achei um **segundo bug real de CI**, que só
+aparece em PR (não em push direto pra `main`, por isso não tinha aparecido
+antes): `dorny/paths-filter` falhava com "Resource not accessible by
+integration" — PRs de fonte externa (Dependabot é tratado como tal) recebem
+`GITHUB_TOKEN` com permissão de leitura mínima por padrão, sem acesso pra
+listar arquivos alterados da PR via API. Corrigido com bloco `permissions`
+explícito (`contents: read`, `pull-requests: read`) no workflow. Pedi
+rebase de novo nas 9 PRs pra validar — as 4 de `docker-compose` (não tocam
+`services/`) e as de Maven (que tocam, disparando os testes de verdade)
+todas passaram até a etapa de teste; só o scan de vulnerabilidade falha,
+exatamente como esperado, por falta da `NVD_API_KEY`.
+
+O que não consegui fazer sozinho (expliquei ao usuário): gerar a
+`NVD_API_KEY` em si — é um cadastro pessoal no site da NVD (nist.gov),
+amarrado à identidade de quem cadastra, não é algo que eu deva fazer em
+nome dele. Ofereci configurar o secret no GitHub via `gh secret set` assim
+que ele tiver o valor.
+
+Criado/alterado: `.github/workflows/ci.yml` (bloco `permissions`);
+`README.md` (badge de CI); `docs/tasks.md`. 9 PRs do Dependabot comentadas
+(`@dependabot rebase`, duas rodadas).
