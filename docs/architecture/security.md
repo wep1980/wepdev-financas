@@ -40,7 +40,7 @@ deve resultar numa linha nova aqui.
 | Credencial do provedor de e-mail transacional | ADR-0013 (proposta) | Vault |
 | Credencial de acesso SSH ao servidor de produção (pessoal, do usuário) | ADR-0016 / `deployment.md` | Fora do sistema — gerenciada pelo usuário, nunca toca o repositório |
 | Token de registro do runner self-hosted do GitHub Actions (uso único, na instalação) | ADR-0020 | Gerado pelo GitHub na hora do registro, não persiste — não é segredo de longo prazo |
-| `NVD_API_KEY` (chave da API do NIST/NVD, pro scan OWASP Dependency-Check) | ADR-0017, `.github/workflows/ci.yml` | GitHub Actions Secret. Sem ela o scan falha com "Invalid API Key" (a NVD passou a exigir chave — validado 2026-08-07). Gratuita, gerar em https://nvd.nist.gov/developers/request-an-api-key |
+| `NVD_API_KEY` (chave da API do NIST/NVD, pro scan OWASP Dependency-Check) | ADR-0017, `.github/workflows/ci.yml` | GitHub Actions Secret (nos dois stores: Actions e Dependabot). Ativa e funcionando desde 2026-08-08 — scan roda até o fim. Gratuita, gerar em https://nvd.nist.gov/developers/request-an-api-key |
 | Token de leitura do `ghcr.io` (se o registry for privado) | ADR-0018 | GitHub Actions Secrets |
 | Token do túnel Cloudflare (Cloudflare Zero Trust) | ADR-0019 | Já gerenciado pelo usuário fora do repositório (mesmo mecanismo do portfólio) — nunca commitado |
 | Chave SSH que o Kamal usa pra conectar em `localhost` (roda a partir do runner self-hosted) | ADR-0021 | Local ao servidor — não é um segredo que trafega pela internet, mas ainda assim nunca versionada |

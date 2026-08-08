@@ -78,20 +78,19 @@ pro `transaction-service` consumir), Bean Validation com erro estruturado,
 IDOR real), evento Kafka em criação, migração Flyway, 45 testes (domínio +
 use case + integração `@QuarkusTest`), imagem Docker validada.
 
-**`transaction-service`** registra, lista e cancela transação, funcionando
-ponta a ponta: registrar/cancelar chamam o `account-service` de forma
-síncrona (débito/crédito, e o inverso ao cancelar) antes de mudar o próprio
-estado (sem transação "fantasma" se a chamada falhar); cancelar é
-idempotente. Evento Kafka em `transacao.eventos`, migração Flyway, 28
-testes, imagem Docker validada. Falta editar/resumo/recorrentes (ver
-`docs/tasks.md`).
+**`transaction-service`** registra, lista, edita, cancela e resume por
+categoria transações, funcionando ponta a ponta: registrar/editar/cancelar
+chamam o `account-service` de forma síncrona (débito/crédito, delta na
+edição, e o inverso ao cancelar) antes de mudar o próprio estado (sem
+transação "fantasma" se a chamada falhar); cancelar é idempotente. Evento
+Kafka em `transacao.eventos`, migração Flyway, 59 testes, imagem Docker
+validada. Falta só transações recorrentes (ver `docs/tasks.md`).
 
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
-(privado). CI validado rodando de verdade — `mvn test` passa nos dois
-serviços no runner hospedado. **Falta só configurar o secret `NVD_API_KEY`**
-(gratuito, gerar em https://nvd.nist.gov/developers/request-an-api-key —
-ver [`docs/architecture/security.md`](docs/architecture/security.md)) pra
-o scan de vulnerabilidade (ADR-0017) passar também. Ver
+(privado). CI 100% verde — `mvn test` passa nos dois serviços no runner
+hospedado e o scan de vulnerabilidade (OWASP Dependency-Check, ADR-0017)
+também passa, com a `NVD_API_KEY` ativa (ver
+[`docs/architecture/security.md`](docs/architecture/security.md)). Ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 
 `docker compose up -d --build account-service transaction-service` sobe os

@@ -16,10 +16,35 @@
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
         <dependency-check-maven.version>13.0.0</dependency-check-maven.version>
+        <mysql-connector-j.version>26.7.0</mysql-connector-j.version>
+        <opentelemetry-semconv.version>1.43.0</opentelemetry-semconv.version>
+        <opentelemetry-semconv-incubating.version>1.43.0-alpha</opentelemetry-semconv-incubating.version>
     </properties>
 
+    <!--
+        mysql-connector-j e opentelemetry-semconv(-incubating) sobrescritos
+        aqui, ANTES do import do quarkus-bom, pra vencer a versão herdada
+        do BOM (que tem CVE de CVSS alto — ver docs/historico.md 2026-08-08).
+        Precisam ficar antes do import: Maven resolve dependencyManagement
+        por "primeira ocorrência vence" na lista efetiva.
+    -->
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.mysql</groupId>
+                <artifactId>mysql-connector-j</artifactId>
+                <version>${mysql-connector-j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry.semconv</groupId>
+                <artifactId>opentelemetry-semconv</artifactId>
+                <version>${opentelemetry-semconv.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry.semconv</groupId>
+                <artifactId>opentelemetry-semconv-incubating</artifactId>
+                <version>${opentelemetry-semconv-incubating.version}</version>
+            </dependency>
             <dependency>
                 <groupId>${quarkus.platform.group-id}</groupId>
                 <artifactId>${quarkus.platform.artifact-id}</artifactId>

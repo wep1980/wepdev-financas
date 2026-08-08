@@ -14,9 +14,9 @@ completo** (criar/listar/buscar/atualizar/excluir) + ajuste de saldo
 tem **registrar**, **listar**, **cancelar**, **editar transação** e
 **resumo por categoria** funcionando ponta a ponta contra o `account-service`
 real, inclusive via `docker compose up` com autenticação de verdade (issuer
-do Keycloak corrigido) — 2026-08-07/08. CI já existe (ver seção de CI/CD
-pro status atual da `NVD_API_KEY`). Falta só **transações recorrentes**
-no backlog de `transaction-service`.
+do Keycloak corrigido) — 2026-08-07/08. CI 100% verde (`NVD_API_KEY` ativa
+desde 2026-08-08, 2 CVEs reais corrigidas por bump de versão). Falta só
+**transações recorrentes** no backlog de `transaction-service`.
 
 ### `account-service`
 
@@ -312,14 +312,25 @@ Conforme `docs/specs/transaction-service.yaml` (endpoints
       (assim que `dependabot.yml` foi pro ar) passaram a rodar `changes` +
       `Testes` com sucesso depois da correção (`@dependabot rebase` pra
       forçar re-teste).
-- [ ] **Só falta a `NVD_API_KEY`** — confirmado, contra PR real também, que
-      o scan falha exatamente como esperado (`Invalid API Key`) sem essa
-      secret, depois de tudo mais (`changes`, `Testes`) passar. Essa parte
-      só o usuário pode fazer (cadastro pessoal na NVD): gerar em
-      https://nvd.nist.gov/developers/request-an-api-key e configurar em
-      Settings → Secrets and variables → Actions → New repository secret
-      no GitHub (ou me passar o valor que eu configuro via `gh secret set`).
-      Depois disso o CI fica 100% verde.
+- [x] **`NVD_API_KEY` ativa e funcionando** — usuário gerou e ativou a
+      chave (segunda tentativa; a primeira ficou presa na confirmação por
+      e-mail, ver entrada de 2026-08-07). Configurada nos dois secret
+      stores do GitHub (`gh secret set --app actions` e `--app dependabot`)
+      — 2026-08-08. Primeira execução completa do scan revelou 2 CVEs reais
+      (não mais "Invalid API Key"): `mysql-connector-j` e
+      `opentelemetry-semconv`/`-incubating`, ambas herdadas do BOM do
+      Quarkus. Corrigidas via override de versão em `dependencyManagement`
+      (ver item de segurança abaixo) — CI 100% verde depois disso.
+- [x] **CVE real corrigida**: `mysql-connector-j:9.7.0` (5 CVEs, CVSS até
+      8.5) e `opentelemetry-semconv`/`opentelemetry-semconv-incubating:1.41.1/1.40.0-alpha`
+      (CVSS 7.3+), achadas pelo primeiro scan completo do Dependency-Check
+      nos dois serviços. Corrigido sobrescrevendo a versão no
+      `dependencyManagement` de cada `pom.xml` (`mysql-connector-j` →
+      `26.7.0`, `opentelemetry-semconv`/`-incubating` → `1.43.0`/`1.43.0-alpha`),
+      declarado **antes** do import do `quarkus-bom` (Maven resolve por
+      "primeira ocorrência vence"). Validado: suíte completa dos dois
+      serviços (MySQL real via Dev Services) passou sem alteração de
+      código — 59 + 45 testes.
 
 ## Próxima fatia (preview — não detalhar ainda)
 

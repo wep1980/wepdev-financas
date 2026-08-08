@@ -763,3 +763,36 @@ literal sobre variável de path automaticamente).
 
 Criado/alterado: `docs/specs/transaction-service.yaml` (resposta 400
 documentada no endpoint); `docs/tasks.md`.
+
+## 2026-08-08 — CI verde de verdade: NVD_API_KEY ativada e 2 CVEs reais corrigidas
+
+A `NVD_API_KEY` que o usuário gerou (segunda tentativa) funcionou —
+primeira vez que o scan do OWASP Dependency-Check rodou até o fim contra
+o CI. Isso revelou vulnerabilidades reais (não era mais só "chave
+inválida"): `mysql-connector-j:9.7.0` com 5 CVEs (CVSS até 8.5) e
+`opentelemetry-semconv`/`opentelemetry-semconv-incubating:1.41.1/1.40.0-alpha`
+com CVEs de CVSS 7.3+ — ambas herdadas transitivamente do BOM do Quarkus
+3.38.1, afetando os dois serviços igualmente (mesma árvore de dependência).
+
+Perguntei ao usuário como preferia resolver (forçar versão nova via
+`dependencyManagement`, atualizar a plataforma Quarkus inteira, ou
+documentar como exceção temporária) — escolheu forçar a versão nova.
+Sobrescrevi `mysql-connector-j` pra `26.7.0` (mudança grande de
+versionamento da Oracle, não é só um patch — saltou de 9.x pra 26.x) e
+`opentelemetry-semconv`/`-incubating` pra `1.43.0`/`1.43.0-alpha` (essas
+são só constantes de convenção semântica, risco baixo). Overrides
+declarados no `dependencyManagement` de cada `pom.xml`, **antes** do
+import do `quarkus-bom` — necessário porque o Maven resolve por "primeira
+ocorrência vence" na lista efetiva de `dependencyManagement`, então um
+override depois do import seria ignorado.
+
+Rodei a suíte de teste completa dos dois serviços (usa MySQL real via
+Quarkus Dev Services, não mock) pra confirmar que o salto grande de versão
+do connector não quebrou nada — 59 testes em `transaction-service` + 45 em
+`account-service`, todos passando sem alteração de código, só a versão da
+dependência mudou.
+
+Criado/alterado: `services/account-service/pom.xml` e
+`services/transaction-service/pom.xml` (overrides de versão);
+`docs/tasks.md`; `docs/architecture/security.md` (`NVD_API_KEY` marcada
+como ativa).
