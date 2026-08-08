@@ -11,8 +11,8 @@ mostrar; mobile depois do web validado.
 
 | # | Fatia | Entrega | Status |
 |---|---|---|---|
-| 1 | Contas + Transações (back-end) | `account-service` + `transaction-service` funcionando, testados, com fluxo síncrono de débito/crédito | 🔲 Speced (OpenAPI pronto), código não iniciado |
-| 2 | `card-service` | Cartões de crédito, fatura e parcelamento, lançamento manual | 🔲 Planejado |
+| 1 | Contas + Transações (back-end) | `account-service` + `transaction-service` funcionando, testados, com fluxo síncrono de débito/crédito | ✅ Entregue (2026-08-08) |
+| 2 | `card-service` | Cartões de crédito, fatura e parcelamento, lançamento manual | 🔶 Em andamento — spec pronta (`docs/specs/card-service.yaml`, ADR-0022), código não iniciado |
 | 3 | `document-service` — parsing manual assistido | Upload de fatura (PDF), extrato (PDF/CSV) e boleto de financiamento (PDF/foto), extração de lançamentos, fluxo de confirmação (PRD 3.2). Foto via mobile depende de confirmar ADR-0015 | 🔲 Planejado |
 | 4 | `budget-service` | Orçamento por categoria/mês, cálculo de "disponível pra gastar" (PRD 3.3) | 🔲 Planejado |
 | 5 | `ai-service` — RAG + chat | `LlmProvider` (ADR-0002), Qdrant (ADR-0005, confirmar antes), tools MCP, agente orquestrador, responde às perguntas do PRD 3.4 | 🔲 Planejado |
@@ -39,4 +39,4 @@ mostrar; mobile depois do web validado.
 
 ## Próxima ação concreta
 
-Ver `docs/tasks.md` — fatia 1 (Contas + Transações) é a atual.
+Ver `docs/tasks.md` — fatia 2 (`card-service`) é a atual.

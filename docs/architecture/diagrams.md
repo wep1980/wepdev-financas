@@ -43,7 +43,7 @@ graph LR
     subgraph "Sistema de Finanças Pessoais"
         AccountSvc["account-service :8081"]
         TxSvc["transaction-service :8082"]
-        CardSvc["card-service :8083 (planejado)"]
+        CardSvc["card-service :8083 (spec pronta)"]
         DocSvc["document-service :8084 (planejado)"]
         BudgetSvc["budget-service :8085 (planejado)"]
         AiSvc["ai-service :8086 (planejado)"]
@@ -159,11 +159,59 @@ erDiagram
     }
 ```
 
-### 3.3 Pendente
+### 3.3 `card-service`
 
-`card-service` e `budget-service` ainda não têm contrato OpenAPI (roadmap
-#2 e #4) — modelo de domínio deles entra aqui quando a spec for escrita
-(spec-driven, ver `CLAUDE.md`), não antes.
+Banco separado (`card_db`, ADR-0001) — sem FK real com `account-service`,
+só referência lógica (`contaPagamentoId`), confirmada de forma síncrona no
+momento de pagar a fatura (ADR-0022).
+
+```mermaid
+erDiagram
+    CARTAO ||--o{ FATURA : possui
+    FATURA ||--o{ PARCELA : contém
+
+    CARTAO {
+        uuid id
+        uuid usuarioId
+        string apelido
+        string bandeira "nullable"
+        decimal limite
+        int diaFechamento
+        int diaVencimento
+        uuid contaPagamentoId "referência lógica ao account-service"
+        boolean ativo
+    }
+    FATURA {
+        uuid id
+        uuid cartaoId
+        uuid usuarioId
+        string competencia "AAAA-MM"
+        date dataFechamento
+        date dataVencimento
+        decimal valorTotal
+        string status "ABERTA|FECHADA|PAGA"
+    }
+    PARCELA {
+        uuid id
+        uuid faturaId
+        uuid compraId "comum a todas as parcelas da mesma compra"
+        string descricao
+        decimal valor
+        string categoria "nullable"
+        int numeroParcela
+        int quantidadeParcelas
+    }
+```
+
+Contrato completo em `docs/specs/card-service.yaml` — código ainda não
+iniciado (ver `docs/tasks.md`), este diagrama é o mapa conceitual, vira
+diagrama de classe (seção 4) quando o domínio for implementado.
+
+### 3.4 Pendente
+
+`budget-service` ainda não tem contrato OpenAPI (roadmap #4) — modelo de
+domínio dele entra aqui quando a spec for escrita (spec-driven, ver
+`CLAUDE.md`), não antes.
 
 ## 4. Diagrama de classes
 

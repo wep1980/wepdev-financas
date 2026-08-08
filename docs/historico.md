@@ -936,5 +936,65 @@ Não validado contra uma PR real nesta sessão (não havia PR aberta) — só
 localmente, confiando no comportamento padrão e bem documentado do `if:`
 condicional do GitHub Actions. Validar na próxima PR real que rodar CI.
 
+**Atualização, mesmo dia**: usuário perguntou se existe interface gráfica
+pro JaCoCo — expliquei que o próprio relatório HTML já gerado É a
+interface (árvore de pacotes/classes, % de cobertura, código-fonte com
+linha destacada por cobertura) e que basta baixar o artefato do run.
+Perguntei se ele queria ver isso sem baixar manualmente toda vez; topou o
+comentário automático na PR. Abri uma PR de teste real (branch
+`ci/test-jacoco-pr-comment`, mudança trivial no README do
+`transaction-service` — adicionar "scheduling" na lista de pacotes,
+PR #10) só pra validar o passo. Confirmado: comentário postado
+corretamente (`Cobertura de teste — transaction-service — Overall
+Project: 80.06%`). Fechei a PR sem merge e limpei a branch (local +
+remota) depois de confirmar.
+
 Criado/alterado: `.github/workflows/ci.yml` (step novo + permissions
 por job nos dois jobs de serviço); `docs/tasks.md`.
+
+## 2026-08-08 — Início da fatia 2: spec do `card-service`
+
+Pedido: "vamos pro próximo passo do roadmap (card-service)".
+
+Antes de escrever a spec, achei uma decisão de arquitetura real não
+resolvida: `account-service` já tem `TipoConta.CARTAO_CREDITO` desde a
+fatia 1, mas `overview.md` já descrevia `card-service` como dono de
+"cartões, faturas, parcelamento" com banco próprio (`card_db`). Perguntei
+ao usuário como os dois deveriam se relacionar — três opções (independente
+sem depender do tipo / cartão sempre amarrado a uma Conta CARTAO_CREDITO /
+remover CARTAO_CREDITO agora). Escolheu independente. Documentei a decisão
+em **ADR-0022**: `Cartao` do `card-service` nunca é uma `Conta`; tem um
+`contaPagamentoId` apontando pra uma `Conta` `CORRENTE`/`POUPANCA`/
+`CARTEIRA` (nunca `CARTAO_CREDITO`, evita circularidade) que é debitada de
+forma síncrona ao pagar a fatura — mesmo padrão já validado de
+`transaction-service` → `account-service`. `TipoConta.CARTAO_CREDITO`
+continua existindo, sem uso rico associado (fica pra quem quer só anotar
+manualmente, sem configurar um cartão de verdade).
+
+Escrevi `docs/specs/card-service.yaml` (spec-driven, antes de qualquer
+código, CLAUDE.md princípio 1): `Cartao` (apelido, bandeira opcional,
+limite, diaFechamento, diaVencimento, contaPagamentoId), `Fatura`
+(competência AAAA-MM, dataFechamento/Vencimento, valorTotal, status
+ABERTA/FECHADA/PAGA — sem endpoint de criação manual, gerada
+automaticamente ao lançar a 1ª compra da competência), Compra/Parcela
+(uma compra com `quantidadeParcelas` gera parcelas em faturas
+consecutivas). Endpoints: CRUD de cartão, lançar compra
+(`POST /cartoes/{id}/compras`), listar/buscar fatura, pagar fatura
+(`POST /faturas/{id}/pagar`, síncrono com account-service, idempotente),
+e `GET /faturas/proximos-vencimentos` (role `service`, mesmo padrão do
+endpoint análogo em `transaction-service`, pro futuro
+`notification-service`).
+
+`docs/tasks.md` reescrito: fatia 1 comprimida num resumo curto (detalhe
+completo já vive em `docs/historico.md` e no git — não duplicado), fatia 2
+detalhada com a ordem sugerida de implementação (vertical, um item de cada
+vez, mesmo padrão usado em `transaction-service`). `docs/roadmap.md`,
+`docs/architecture/overview.md` e `docs/architecture/diagrams.md`
+(seção 3.3 nova — modelo ER conceitual do `card-service`, mesmo padrão já
+usado pro `notification-service` antes de ter código) atualizados pra
+refletir fatia 1 concluída e fatia 2 com spec pronta.
+
+Criado/alterado: `docs/architecture/adr/0022-card-service-independente-de-conta.md`
+(novo); `docs/specs/card-service.yaml` (novo); `docs/tasks.md` (reescrito);
+`docs/roadmap.md`; `docs/architecture/overview.md`;
+`docs/architecture/diagrams.md`.

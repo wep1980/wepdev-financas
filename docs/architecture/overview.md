@@ -15,9 +15,9 @@ microsserviços em vez de monólito nesse projeto.
 
 | Serviço | Responsabilidade | Porta | Banco | Status |
 |---|---|---|---|---|
-| `account-service` | Contas financeiras (criar, listar, debitar/creditar saldo) | 8081 | MySQL (`account_db`) | CRUD de leitura + ajuste de saldo completos (criar/listar/buscar/debitar/creditar), 28 testes; falta só CI (ver `docs/tasks.md`) |
-| `transaction-service` | Registrar/consultar transações (inclusive recorrentes, ver ADR-0009); chama `account-service` p/ refletir no saldo | 8082 | MySQL (`transaction_db`) | Registrar transação funcionando ponta a ponta (síncrono com account-service), 13 testes; falta listar/editar/cancelar/resumo/recorrentes e CI (ver `docs/tasks.md`) |
-| `card-service` | Cartões de crédito, faturas, parcelamento | 8083 | MySQL (`card_db`) | Planejado |
+| `account-service` | Contas financeiras (criar, listar, debitar/creditar saldo) | 8081 | MySQL (`account_db`) | ✅ Entregue — CRUD completo + débito/crédito, 45 testes, CI verde |
+| `transaction-service` | Registrar/consultar transações (inclusive recorrentes, ver ADR-0009); chama `account-service` p/ refletir no saldo | 8082 | MySQL (`transaction_db`) | ✅ Entregue — registrar/listar/editar/cancelar/resumo/recorrentes, 91 testes, CI verde |
+| `card-service` | Cartões de crédito, faturas, parcelamento — independente de `TipoConta.CARTAO_CREDITO` (ADR-0022) | 8083 | MySQL (`card_db`) | 🔶 Spec pronta (`docs/specs/card-service.yaml`), código não iniciado (ver `docs/tasks.md`) |
 | `document-service` | Upload e parsing de fatura (PDF), extrato (PDF/CSV) e boleto de financiamento (PDF/foto, ADR-0014); no mobile, qualquer tipo pode vir por foto (ADR-0015); gera transações pendentes | 8084 | MongoDB (documento bruto + resultado do parsing) + MySQL (referência a transações pendentes) | Planejado |
 | `budget-service` | Orçamento por categoria/mês, cálculo de "disponível pra gastar" | 8085 | MySQL (`budget_db`) | Planejado |
 | `ai-service` | Orquestração de agentes, RAG, chat em linguagem natural, MCP tools | 8086 | Qdrant (vetores, proposto ADR-0005) + MongoDB (histórico de conversas) | Planejado |

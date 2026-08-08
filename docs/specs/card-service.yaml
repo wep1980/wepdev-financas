@@ -1,0 +1,366 @@
+openapi: 3.0.3
+info:
+  title: Card Service - Sistema de Finanças Pessoais
+  description: >
+    Gerencia cartões de crédito, faturas e parcelamento. Independente do
+    TipoConta.CARTAO_CREDITO do account-service (ver ADR-0022) — cada
+    Cartao aponta pra uma Conta (CORRENTE/POUPANCA/CARTEIRA) que paga a
+    fatura, débito síncrono no account-service no momento do pagamento.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8083
+paths:
+  /api/v1/cartoes:
+    post:
+      summary: >
+        Cria um novo cartão de crédito. `usuarioId` não faz parte do corpo —
+        vem do claim `sub` do token, igual ao account-service (ADR-0003).
+        `contaPagamentoId` precisa apontar pra uma conta do usuário no
+        account-service (validado de forma síncrona, mesmo padrão do
+        transaction-service confirmando posse de conta).
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarCartaoRequest"
+      responses:
+        "201":
+          description: Cartão criado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartaoResponse" }
+        "400":
+          description: Campo obrigatório ausente/inválido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroValidacaoResponse" }
+        "404":
+          description: contaPagamentoId não existe (ou não pertence ao usuário)
+    get:
+      summary: Lista os cartões ativos do usuário autenticado
+      security: [{ oidc: [usuario] }]
+      responses:
+        "200":
+          description: Lista de cartões
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CartaoResponse" }
+
+  /api/v1/cartoes/{id}:
+    get:
+      summary: Busca um cartão pelo id (404 se não existir ou não for do usuário — nunca 403, mesmo padrão do account-service)
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Cartão encontrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartaoResponse" }
+        "404":
+          description: Cartão não encontrado (ou pertence a outro usuário)
+    put:
+      summary: Atualiza apelido/limite/dias de fechamento e vencimento/conta de pagamento de um cartão
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarCartaoRequest"
+      responses:
+        "200":
+          description: Cartão atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartaoResponse" }
+        "400":
+          description: Campo obrigatório ausente/inválido
+        "404":
+          description: Cartão (ou contaPagamentoId) não encontrado, ou não pertence ao usuário
+    delete:
+      summary: >
+        Exclui (logicamente) um cartão — marca como inativo, nunca apaga a
+        linha (histórico financeiro é auditável, CLAUDE.md princípio 5).
+        Não afeta faturas/compras já existentes. Idempotente.
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Cartão inativado
+        "404":
+          description: Cartão não encontrado (ou pertence a outro usuário)
+
+  /api/v1/cartoes/{id}/compras:
+    post:
+      summary: >
+        Lança uma compra no cartão (à vista ou parcelada). O sistema decide
+        em qual fatura cai a 1ª parcela (se dataCompra for antes do dia de
+        fechamento do mês corrente, cai na fatura do mês corrente; senão,
+        na do mês seguinte) e distribui as parcelas seguintes nas faturas
+        subsequentes, criando cada fatura automaticamente se ainda não
+        existir. Não chama o account-service aqui — só ao pagar a fatura
+        (POST /faturas/{id}/pagar).
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LancarCompraRequest"
+      responses:
+        "201":
+          description: Compra lançada (parcelas distribuídas nas faturas correspondentes)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompraResponse" }
+        "400":
+          description: Campo obrigatório ausente/inválido
+        "404":
+          description: Cartão não encontrado (ou pertence a outro usuário)
+
+  /api/v1/cartoes/{id}/faturas:
+    get:
+      summary: Lista as faturas de um cartão, mais recente primeiro
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { type: string, enum: [ABERTA, FECHADA, PAGA] }
+      responses:
+        "200":
+          description: Lista de faturas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FaturaResponse" }
+        "404":
+          description: Cartão não encontrado (ou pertence a outro usuário)
+
+  /api/v1/faturas/{id}:
+    get:
+      summary: Busca uma fatura pelo id, com os lançamentos (parcelas) que a compõem
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Fatura encontrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaturaDetalheResponse" }
+        "404":
+          description: Fatura não encontrada (ou pertence a outro usuário)
+
+  /api/v1/faturas/{id}/pagar:
+    post:
+      summary: >
+        Paga a fatura — debita o valorTotal da contaPagamentoId do cartão,
+        de forma síncrona com o account-service (antes de marcar como PAGA;
+        se o débito falhar, a fatura continua FECHADA, sem "pagamento
+        fantasma"). Só permite pagar fatura FECHADA (ainda ABERTA não tem
+        valorTotal definitivo; já PAGA é idempotente — 204 sem debitar de
+        novo).
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Fatura paga (ou já estava paga — idempotente)
+        "404":
+          description: Fatura não encontrada (ou pertence a outro usuário)
+        "422":
+          description: >
+            Fatura ainda ABERTA (não fechou, não tem valorTotal definitivo
+            pra pagar) ou saldo insuficiente na contaPagamentoId
+
+  /api/v1/faturas/proximos-vencimentos:
+    get:
+      summary: >
+        [Endpoint interno] Lista, para todos os usuários, as faturas FECHADA
+        (ainda não PAGA) com vencimento dentro da janela de dias informada.
+        Usado pelo job diário do notification-service (ADR-0010) — mesmo
+        padrão do endpoint análogo em transaction-service.
+      security: [{ oidc: [service] }]
+      parameters:
+        - name: dias
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Janela de antecedência em dias (ex. 7 = tudo que vence nos próximos 7 dias)
+      responses:
+        "200":
+          description: Próximos vencimentos de fatura previstos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProximoVencimentoFaturaResponse" }
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/realms/financas/.well-known/openid-configuration
+  schemas:
+    CriarCartaoRequest:
+      type: object
+      required: [apelido, limite, diaFechamento, diaVencimento, contaPagamentoId]
+      properties:
+        apelido: { type: string, description: 'Nome dado pelo usuário, ex: "Nubank Roxinho"' }
+        bandeira:
+          type: string
+          enum: [VISA, MASTERCARD, ELO, AMEX, OUTRA]
+          nullable: true
+        limite: { type: number, format: decimal }
+        diaFechamento: { type: integer, minimum: 1, maximum: 31, description: 'Dia do mês em que a fatura fecha' }
+        diaVencimento: { type: integer, minimum: 1, maximum: 31, description: 'Dia do mês em que a fatura vence' }
+        contaPagamentoId:
+          type: string
+          format: uuid
+          description: Conta do account-service (CORRENTE/POUPANCA/CARTEIRA) que paga a fatura
+    AtualizarCartaoRequest:
+      type: object
+      required: [apelido, limite, diaFechamento, diaVencimento, contaPagamentoId]
+      properties:
+        apelido: { type: string }
+        bandeira: { type: string, enum: [VISA, MASTERCARD, ELO, AMEX, OUTRA], nullable: true }
+        limite: { type: number, format: decimal }
+        diaFechamento: { type: integer, minimum: 1, maximum: 31 }
+        diaVencimento: { type: integer, minimum: 1, maximum: 31 }
+        contaPagamentoId: { type: string, format: uuid }
+    CartaoResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        apelido: { type: string }
+        bandeira: { type: string, nullable: true }
+        limite: { type: number, format: decimal }
+        diaFechamento: { type: integer }
+        diaVencimento: { type: integer }
+        contaPagamentoId: { type: string, format: uuid }
+        ativo: { type: boolean }
+        criadoEm: { type: string, format: date-time }
+
+    LancarCompraRequest:
+      type: object
+      required: [descricao, valorTotal, dataCompra]
+      properties:
+        descricao: { type: string }
+        valorTotal: { type: number, format: decimal, description: 'Valor total da compra, não da parcela' }
+        categoria: { type: string }
+        dataCompra: { type: string, format: date }
+        quantidadeParcelas:
+          type: integer
+          minimum: 1
+          default: 1
+          description: '1 = à vista. valorTotal é dividido pelas parcelas (arredondamento sobra pra última parcela)'
+    CompraResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid, description: 'Identifica a compra — comum a todas as parcelas geradas' }
+        cartaoId: { type: string, format: uuid }
+        descricao: { type: string }
+        valorTotal: { type: number, format: decimal }
+        categoria: { type: string, nullable: true }
+        dataCompra: { type: string, format: date }
+        quantidadeParcelas: { type: integer }
+        parcelas:
+          type: array
+          items: { $ref: "#/components/schemas/ParcelaResponse" }
+    ParcelaResponse:
+      type: object
+      properties:
+        faturaId: { type: string, format: uuid }
+        competencia: { type: string, description: 'Formato AAAA-MM' }
+        numeroParcela: { type: integer }
+        valor: { type: number, format: decimal }
+
+    FaturaResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        cartaoId: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        competencia: { type: string, description: 'Formato AAAA-MM' }
+        dataFechamento: { type: string, format: date }
+        dataVencimento: { type: string, format: date }
+        valorTotal: { type: number, format: decimal }
+        status: { type: string, enum: [ABERTA, FECHADA, PAGA] }
+    FaturaDetalheResponse:
+      allOf:
+        - $ref: "#/components/schemas/FaturaResponse"
+        - type: object
+          properties:
+            parcelas:
+              type: array
+              items: { $ref: "#/components/schemas/ParcelaDetalheResponse" }
+    ParcelaDetalheResponse:
+      type: object
+      properties:
+        compraId: { type: string, format: uuid }
+        descricao: { type: string }
+        categoria: { type: string, nullable: true }
+        numeroParcela: { type: integer }
+        quantidadeParcelas: { type: integer }
+        valor: { type: number, format: decimal }
+
+    ProximoVencimentoFaturaResponse:
+      type: object
+      properties:
+        faturaId: { type: string, format: uuid }
+        cartaoId: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        apelidoCartao: { type: string }
+        valorTotal: { type: number, format: decimal }
+        dataVencimento: { type: string, format: date }
+
+    ErroResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+    ErroValidacaoResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+        erros:
+          type: array
+          items:
+            type: object
+            properties:
+              campo: { type: string }
+              mensagem: { type: string }
