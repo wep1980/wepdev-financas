@@ -305,8 +305,25 @@ Conforme `docs/specs/transaction-service.yaml` (endpoints
 - [x] `.github/workflows/ci.yml` (ADR-0018): job `changes` detecta path
       alterado (`dorny/paths-filter`), dispara `account-service` e/ou
       `transaction-service` só se o respectivo `services/*` mudou. Cada
-      job: `mvn test` (unitário + integração) + `mvn dependency-check:check`
-      (ADR-0017, scan OWASP). CD fica pra fatia 9, como já decidido.
+      job: `mvn test` (unitário + integração) + cobertura JaCoCo publicada
+      como artefato do run + build da imagem Docker (validação, não
+      publica em registry) + `mvn dependency-check:check` (ADR-0017, scan
+      OWASP). CD fica pra fatia 9, como já decidido.
+- [x] **Cobertura de testes (JaCoCo)** — `jacoco-maven-plugin` (0.8.15,
+      confirmado via Maven Central) nos dois `pom.xml`, `prepare-agent`
+      (injeta o javaagent via `@{argLine}` no surefire — account-service
+      não tinha essa property configurada, precisou adicionar) + `report`
+      bindado na fase `test`, então roda dentro do `mvn test` normal
+      (validado: gera HTML com contagem real de classes analisadas —
+      63 em transaction-service, 30 em account-service). CI publica o
+      relatório HTML como artefato do workflow run (`actions/upload-artifact`,
+      14 dias de retenção) — sem Sonar/serviço externo por enquanto
+      (avaliado SonarCloud, usuário preferiu não configurar agora).
+- [x] **Build de imagem Docker no CI (validação)** — `mvn package -DskipTests`
+      + `docker build -f src/main/docker/Dockerfile.jvm` a cada job, só pra
+      garantir que a imagem continua buildando a cada mudança; não publica
+      em registry nem faz deploy (isso é fatia 9). Runners `ubuntu-latest`
+      já vêm com Docker instalado, não precisou de setup extra.
 - [x] `dependency-check-maven` (13.0.0 — confirmado via Maven Central,
       2026-08-07) declarado nos dois `pom.xml`, sem `<executions>` (não
       roda em `mvn test`/`package` local, só via `mvn dependency-check:check`

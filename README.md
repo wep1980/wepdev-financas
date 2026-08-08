@@ -92,7 +92,9 @@ Flyway, 91 testes, imagem Docker validada. Backlog do serviço completo
 
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
 (privado). CI 100% verde — `mvn test` passa nos dois serviços no runner
-hospedado e o scan de vulnerabilidade (OWASP Dependency-Check, ADR-0017)
+hospedado, cobertura publicada como artefato do run (JaCoCo), a imagem
+Docker é validada a cada mudança (`docker build`, sem publicar em
+registry) e o scan de vulnerabilidade (OWASP Dependency-Check, ADR-0017)
 também passa, com a `NVD_API_KEY` ativa (ver
 [`docs/architecture/security.md`](docs/architecture/security.md)). Ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.

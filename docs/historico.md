@@ -870,3 +870,44 @@ aplicação (`CriarTransacaoRecorrenteUseCase`, `ListarTransacoesRecorrentesUseC
 `docs/specs/transaction-service.yaml` (respostas 400/404/422
 documentadas no `POST`); `docs/architecture/diagrams.md` (seção 4.3
 nova); `docs/tasks.md`.
+
+## 2026-08-08 — Cobertura de teste (JaCoCo) e build de imagem Docker no CI
+
+Pedido: usuário perguntou se dava pra usar Sonar no código e como
+implementar no GitHub Actions, e se eu sugeria mais alguma coisa pro CI.
+Expliquei duas opções — SonarCloud (hospedado, plano free cobre repo
+privado até ~50k linhas, mas exige cadastro pessoal do usuário + um
+`SONAR_TOKEN` novo, mesma dança da `NVD_API_KEY`) ou SonarQube self-hosted
+(grátis mas mais um serviço pra manter no servidor único, só faz sentido
+depois que a fatia 9/deploy existir) — usuário decidiu não configurar
+Sonar por agora, só queria entender a opção. Sugeri duas coisas menores e
+o usuário topou as duas: cobertura de teste (JaCoCo) e build de imagem
+Docker como validação no CI.
+
+Implementado: `jacoco-maven-plugin` (0.8.15) nos dois `pom.xml` —
+`prepare-agent` injeta o javaagent via a property `@{argLine}` que o
+surefire já esperava (só o `transaction-service` tinha isso configurado;
+precisei adicionar `<argLine>@{argLine}</argLine>` no `account-service`
+também); `report` bindado na fase `test`, roda dentro do `mvn test`
+normal sem precisar de fase separada. Validado localmente: gera HTML com
+contagem real de classes analisadas (63 em `transaction-service`, 30 em
+`account-service`) — confirma que o `report` roda DEPOIS dos testes
+mesmo os dois estando bindados na mesma fase `test` (ordem: bindings
+automáticos do packaging, como o `surefire:test`, executam antes das
+`<executions>` declaradas explicitamente no POM pra essa mesma fase).
+CI publica o relatório como artefato do workflow run
+(`actions/upload-artifact`, 14 dias de retenção) — sem publicar em
+nenhum serviço externo.
+
+Também adicionado: passo de build de imagem Docker (`mvn package
+-DskipTests` + `docker build -f src/main/docker/Dockerfile.jvm`) em cada
+job do CI, só pra validar que a imagem continua buildando a cada mudança
+— não publica em registry nem faz deploy (isso continua reservado pra
+fatia 9, ADR-0020/0021). Runners `ubuntu-latest` já vêm com Docker
+instalado. Validado localmente antes do push (mesmo padrão da sessão:
+nunca confiar em config sem rodar de verdade).
+
+Criado/alterado: `services/account-service/pom.xml` e
+`services/transaction-service/pom.xml` (plugin JaCoCo + `argLine` no
+account-service); `.github/workflows/ci.yml` (passos de cobertura e
+build Docker nos dois jobs); `docs/tasks.md`.

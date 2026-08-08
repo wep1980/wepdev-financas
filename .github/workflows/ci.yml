@@ -52,6 +52,21 @@ jobs:
           cache-dependency-path: services/account-service/pom.xml
       - name: Testes (unitário + integração)
         run: ./mvnw test -B
+      # jacoco:report já roda dentro de "mvn test" (bind na fase test, ver
+      # pom.xml) — aqui só publica o HTML gerado como artefato do run.
+      - name: Publicar relatório de cobertura (JaCoCo)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report-account-service
+          path: services/account-service/target/site/jacoco/
+          retention-days: 14
+      # Só valida que a imagem continua buildando — publicar em registry e
+      # fazer deploy fica pra fatia 9 (ADR-0020/0021, ver comentário no
+      # topo do arquivo). -DskipTests porque os testes já rodaram acima.
+      - name: Build da imagem Docker (validação, não publica)
+        run: |
+          ./mvnw package -B -DskipTests
+          docker build -f src/main/docker/Dockerfile.jvm -t account-service:ci .
       # Precisa de NVD_API_KEY (secret do repo) — sem ela o NVD rejeita a
       # sincronização com "Invalid API Key" (validado localmente,
       # 2026-08-07). Gerar de graça em https://nvd.nist.gov/developers/request-an-api-key.
@@ -81,6 +96,16 @@ jobs:
           cache-dependency-path: services/transaction-service/pom.xml
       - name: Testes (unitário + integração)
         run: ./mvnw test -B
+      - name: Publicar relatório de cobertura (JaCoCo)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report-transaction-service
+          path: services/transaction-service/target/site/jacoco/
+          retention-days: 14
+      - name: Build da imagem Docker (validação, não publica)
+        run: |
+          ./mvnw package -B -DskipTests
+          docker build -f src/main/docker/Dockerfile.jvm -t transaction-service:ci .
       - name: Cache da base de dados do OWASP Dependency-Check
         uses: actions/cache@v6
         with:
