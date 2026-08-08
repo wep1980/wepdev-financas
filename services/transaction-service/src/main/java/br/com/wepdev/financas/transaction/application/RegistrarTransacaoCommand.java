@@ -13,6 +13,12 @@ public record RegistrarTransacaoCommand(
         BigDecimal valor,
         TipoTransacao tipo,
         String categoria,
-        LocalDate dataTransacao
+        LocalDate dataTransacao,
+        UUID transacaoRecorrenteId
 ) {
+    /** Registro comum (não vindo de uma regra recorrente) — transacaoRecorrenteId fica null. */
+    public RegistrarTransacaoCommand(UUID contaId, UUID usuarioId, String descricao, BigDecimal valor,
+                                      TipoTransacao tipo, String categoria, LocalDate dataTransacao) {
+        this(contaId, usuarioId, descricao, valor, tipo, categoria, dataTransacao, null);
+    }
 }

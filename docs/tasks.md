@@ -11,12 +11,14 @@ Specs já existem: `docs/specs/account-service.yaml`,
 `docs/specs/transaction-service.yaml`. `account-service` tem **CRUD
 completo** (criar/listar/buscar/atualizar/excluir) + ajuste de saldo
 (débito/crédito) funcionando ponta a ponta, com teste. `transaction-service`
-tem **registrar**, **listar**, **cancelar**, **editar transação** e
-**resumo por categoria** funcionando ponta a ponta contra o `account-service`
-real, inclusive via `docker compose up` com autenticação de verdade (issuer
-do Keycloak corrigido) — 2026-08-07/08. CI 100% verde (`NVD_API_KEY` ativa
-desde 2026-08-08, 2 CVEs reais corrigidas por bump de versão). Falta só
-**transações recorrentes** no backlog de `transaction-service`.
+tem **registrar**, **listar**, **cancelar**, **editar transação**,
+**resumo por categoria** e **transações recorrentes** (com job agendado)
+funcionando ponta a ponta contra o `account-service` real, inclusive via
+`docker compose up` com autenticação de verdade (issuer do Keycloak
+corrigido) — 2026-08-07/08. CI 100% verde (`NVD_API_KEY` ativa desde
+2026-08-08, 2 CVEs reais corrigidas por bump de versão). Backlog do
+`transaction-service` completo — próxima fatia é `card-service` (ver
+seção "Próxima fatia" no fim deste arquivo).
 
 ### `account-service`
 
@@ -226,25 +228,56 @@ Conforme `docs/specs/transaction-service.yaml` (endpoints
 `/api/v1/transacoes-recorrentes*`) e ADR-0009 — pré-requisito pra fatia 5
 (`ai-service` chamar `criar_transacao` com recorrência, PRD 3.5).
 
-- [ ] Entidade `TransacaoRecorrente` (domínio): frequência (só `MENSAL` no
-      v1), `quantidadeOcorrencias` nullable (null = indefinida),
+- [x] Entidade `TransacaoRecorrente` (domínio): frequência (só `MENSAL` no
+      v1, `proximaDataVencimento()` calcula via `dataInicio.plusMonths(ocorrenciasGeradas)`),
+      `quantidadeOcorrencias` nullable (null = indefinida),
       `ocorrenciasGeradas`, status (`ATIVA|PAUSADA|CANCELADA|CONCLUIDA`).
-- [ ] Caso de uso: criar regra recorrente → gera a 1ª ocorrência (`Transacao`
-      com `transacaoRecorrenteId` preenchido) imediatamente, síncrono com
-      `account-service` igual a uma transação normal.
-- [ ] Job agendado (Quarkus Scheduler) que roda periodicamente e gera a
-      próxima ocorrência de cada regra `ATIVA`, respeitando
-      `quantidadeOcorrencias` — ao atingir o limite, regra vira `CONCLUIDA`
-      automaticamente. Testar com tempo controlado (não depender de
-      `Thread.sleep`/tempo real no teste).
-- [ ] Caso de uso: cancelar regra (exclusão lógica, `CANCELADA`) — não afeta
-      ocorrências já geradas.
-- [ ] Endpoints REST (`POST`/`GET`/`GET {id}`/`DELETE`) conforme o contrato.
-- [ ] Testes unitários: geração de ocorrência respeitando limite, regra
-      indefinida nunca conclui sozinha, cancelamento não gera mais
-      ocorrências.
-- [ ] Testes de integração (Testcontainers) cobrindo o job agendado de
-      ponta a ponta.
+      `registrarOcorrenciaGerada()` conclui automaticamente ao atingir o
+      limite. Distinta de parcelamento de cartão (ADR-0009, `card-service`
+      não reaproveita essa classe).
+- [x] Caso de uso: **criar regra recorrente** (`CriarTransacaoRecorrenteUseCase`,
+      `POST /transacoes-recorrentes`) → gera a 1ª ocorrência (`Transacao`
+      com `transacaoRecorrenteId` preenchido) imediatamente, **reusando
+      `RegistrarTransacaoUseCase`** (mesmo caminho síncrono com
+      `account-service` de uma transação avulsa, sem duplicar lógica de
+      saldo). Se `quantidadeOcorrencias == 1`, a regra já nasce `CONCLUIDA`.
+- [x] **Job agendado** (`GerarOcorrenciasRecorrentesJob`, `quarkus-scheduler`,
+      cron diário 00:05) que gera a próxima ocorrência de cada regra
+      `ATIVA` vencida, respeitando `quantidadeOcorrencias` — ao atingir o
+      limite, regra vira `CONCLUIDA` automaticamente. Núcleo testável
+      separado do wrapper (`GerarOcorrenciasRecorrentesUseCase.executar(LocalDate hoje)`
+      recebe a data como parâmetro em vez de ler o relógio — testado com
+      datas controladas, sem `Thread.sleep`/tempo real). Gera no máximo 1
+      ocorrência por regra por execução; atraso é recuperado
+      incrementalmente nas execuções seguintes. Desabilitado em teste
+      (`%test.quarkus.scheduler.enabled=false`) pra não rodar em paralelo
+      com a suíte.
+- [x] Caso de uso: **cancelar regra** (`CancelarTransacaoRecorrenteUseCase`,
+      `DELETE /transacoes-recorrentes/{id}`, exclusão lógica, idempotente)
+      — não afeta ocorrências já geradas.
+- [x] Endpoints REST (`POST`/`GET`/`GET {id}`/`DELETE`) conforme o contrato,
+      mais `GET /proximos-vencimentos` (role `service`, usado pelo futuro
+      `notification-service`, ADR-0010) — todos em `TransacaoRecorrenteResource`.
+- [x] Testes unitários: geração de ocorrência respeitando limite
+      (`deveriaConcluirRegra_quandoAtingeQuantidadeOcorrenciasNestaExecucao`),
+      regra indefinida nunca conclui sozinha (24 execuções seguidas,
+      continua `ATIVA`), cancelamento não gera mais ocorrências (regra
+      cancelada não aparece em `listarAtivas()`). 7 testes de domínio
+      (`TransacaoRecorrenteTest`) + testes de caso de uso pra cada operação
+      + 12 de integração REST (`TransacaoRecorrenteResourceTest`, inclui
+      role `service` no endpoint interno) — 91 testes no total do serviço.
+      Validado de ponta a ponta contra containers reais: criar regra
+      indefinida → saldo reflete 1ª ocorrência; criar regra com
+      `quantidadeOcorrencias=1` → nasce `CONCLUIDA`; cancelar → some da
+      listagem `ATIVA`, idempotente; `/proximos-vencimentos` com token de
+      usuário dá 403, com token de serviço (client_credentials) retorna a
+      janela correta.
+- [ ] Teste de integração (Testcontainers) cobrindo o **wrapper do
+      scheduler** (`GerarOcorrenciasRecorrentesJob`) disparando via cron de
+      verdade, não só o caso de uso chamado direto com data controlada —
+      exigiria manipular o relógio do container ou esperar tempo real,
+      deixado pra quando isso for realmente necessário (o núcleo da lógica
+      já está coberto).
 
 ### Transversal
 

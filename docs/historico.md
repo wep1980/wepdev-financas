@@ -796,3 +796,77 @@ Criado/alterado: `services/account-service/pom.xml` e
 `services/transaction-service/pom.xml` (overrides de versão);
 `docs/tasks.md`; `docs/architecture/security.md` (`NVD_API_KEY` marcada
 como ativa).
+
+## 2026-08-08 — Transações recorrentes (fecha o backlog de `transaction-service`)
+
+Pedido: "vamos para o próximo passo" — último item do backlog do
+`transaction-service` (`docs/tasks.md`), conforme ADR-0009 (regra
+recorrente é conceito genérico do `transaction-service`, distinto de
+parcelamento de cartão do futuro `card-service`) e a spec já existente em
+`docs/specs/transaction-service.yaml`.
+
+Implementado: entidade `TransacaoRecorrente` (domínio) — frequência só
+`MENSAL` no v1, `proximaDataVencimento()` calcula `dataInicio.plusMonths(ocorrenciasGeradas)`,
+`registrarOcorrenciaGerada()` conclui automaticamente ao atingir
+`quantidadeOcorrencias` (null = indefinida, nunca conclui sozinha).
+`CriarTransacaoRecorrenteUseCase` **reusa `RegistrarTransacaoUseCase`**
+pra gerar cada ocorrência — mesmo caminho síncrono com o
+`account-service` de uma transação avulsa, sem duplicar lógica de saldo
+(precisou de um pequeno ajuste: `Transacao.criar()` ganhou um overload
+aceitando `transacaoRecorrenteId`, e `RegistrarTransacaoCommand` ganhou o
+mesmo campo opcional). Job agendado (`GerarOcorrenciasRecorrentesJob`,
+`quarkus-scheduler`, cron diário) é um wrapper fino sobre
+`GerarOcorrenciasRecorrentesUseCase.executar(LocalDate hoje)` — a data
+"hoje" é parâmetro explícito em vez de `LocalDate.now()` lido dentro da
+lógica, o que permitiu testar geração de ocorrência, limite de
+`quantidadeOcorrencias` e regra indefinida (24 execuções seguidas sem
+concluir sozinha) sem `Thread.sleep` nem tempo real — desabilitado em
+teste (`%test.quarkus.scheduler.enabled=false`) pra não rodar em paralelo
+com a suíte. Endpoints REST completos (`POST`/`GET`/`GET {id}`/`DELETE`
++ `GET /proximos-vencimentos`, este último role `service`, consumido no
+futuro pelo `notification-service` conforme ADR-0010).
+
+Bug achado pelo próprio teste (não em produção, mesma classe de erro que
+já apareceu no resumo por categoria): um teste de isolamento
+(`naoDeveriaListarRegraDeOutroUsuario`) reusou o mesmo `sub` de outros
+testes da classe que já tinham criado regras pra aquele usuário — como
+não há rollback entre métodos de teste na mesma classe, a asserção
+"size() == 0" falhou com 4 regras. Corrigido com um `sub` exclusivo pro
+teste de isolamento (mesmo padrão já estabelecido com `SUB_LISTAGEM_*`
+em `TransacaoResourceTest`).
+
+19 testes unitários novos (7 domínio + 12 casos de uso, cobrindo os três
+critérios do backlog: limite respeitado, indefinida nunca conclui
+sozinha, cancelamento não gera mais ocorrências) + 12 de integração REST
+— 91 testes no total do serviço, todos passando. Validado de ponta a
+ponta contra containers reais: criar regra indefinida de salário →
+saldo reflete a 1ª ocorrência imediatamente; criar regra com
+`quantidadeOcorrencias=1` → nasce `CONCLUIDA`; listar filtrado por
+`status=ATIVA`; cancelar → some da listagem, idempotente; chamar
+`/proximos-vencimentos` com token de usuário dá 403, com token de
+serviço (client_credentials do próprio `transaction-service`) retorna a
+janela de dias correta (testado com uma regra cujo próximo vencimento
+ficava fora de uma janela de 30 dias mas dentro de uma janela de 60).
+
+Não implementado nesta sessão (registrado como pendência explícita):
+teste de integração do **wrapper do scheduler** disparando via cron de
+verdade — exigiria manipular relógio do container ou esperar tempo real;
+o núcleo testável (`GerarOcorrenciasRecorrentesUseCase`) já está coberto,
+o wrapper é só 5 linhas ligando `LocalDate.now()` a ele.
+
+Isso fecha o backlog completo do `transaction-service` (fatia 1). Próxima
+fatia do roadmap é `card-service`.
+
+Criado/alterado (só `transaction-service`): domínio
+(`TransacaoRecorrente`, `FrequenciaRecorrencia`,
+`StatusTransacaoRecorrente`, `TransacaoRecorrenteNaoEncontradaException`,
+`TransacaoRecorrenteRepository`); persistência (migração Flyway V2,
+`TransacaoRecorrenteEntity`/`Mapper`/`PanacheRepository`/`RepositoryImpl`);
+aplicação (`CriarTransacaoRecorrenteUseCase`, `ListarTransacoesRecorrentesUseCase`,
+`BuscarTransacaoRecorrenteUseCase`, `CancelarTransacaoRecorrenteUseCase`,
+`GerarOcorrenciasRecorrentesUseCase`, `ProximosVencimentosUseCase`); REST
+(`TransacaoRecorrenteResource`, DTOs, exception mapper); scheduler
+(`GerarOcorrenciasRecorrentesJob`); `pom.xml` (`quarkus-scheduler`);
+`docs/specs/transaction-service.yaml` (respostas 400/404/422
+documentadas no `POST`); `docs/architecture/diagrams.md` (seção 4.3
+nova); `docs/tasks.md`.

@@ -79,12 +79,16 @@ IDOR real), evento Kafka em criação, migração Flyway, 45 testes (domínio +
 use case + integração `@QuarkusTest`), imagem Docker validada.
 
 **`transaction-service`** registra, lista, edita, cancela e resume por
-categoria transações, funcionando ponta a ponta: registrar/editar/cancelar
-chamam o `account-service` de forma síncrona (débito/crédito, delta na
-edição, e o inverso ao cancelar) antes de mudar o próprio estado (sem
-transação "fantasma" se a chamada falhar); cancelar é idempotente. Evento
-Kafka em `transacao.eventos`, migração Flyway, 59 testes, imagem Docker
-validada. Falta só transações recorrentes (ver `docs/tasks.md`).
+categoria transações, e gerencia regras de transação recorrente (salário,
+assinatura, aluguel — distinto de parcelamento de cartão, ver ADR-0009),
+funcionando ponta a ponta: registrar/editar/cancelar chamam o
+`account-service` de forma síncrona (débito/crédito, delta na edição, e o
+inverso ao cancelar) antes de mudar o próprio estado (sem transação
+"fantasma" se a chamada falhar); cancelar é idempotente. Regra recorrente
+gera a 1ª ocorrência na criação e as seguintes via job agendado
+(`quarkus-scheduler`). Evento Kafka em `transacao.eventos`, migração
+Flyway, 91 testes, imagem Docker validada. Backlog do serviço completo
+(ver `docs/tasks.md`).
 
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
 (privado). CI 100% verde — `mvn test` passa nos dois serviços no runner
@@ -136,6 +140,11 @@ Contrato completo em [`docs/specs/transaction-service.yaml`](docs/specs/transact
 | `GET` | `/api/v1/transacoes/resumo-por-categoria` | `usuario` | Soma DESPESA confirmada por categoria num período (`inicio`/`fim` obrigatórios); inclui `percentualDoTotal` e comparação com o período anterior de mesma duração; 400 se `inicio` depois de `fim` |
 | `PUT` | `/api/v1/transacoes/{id}` | `usuario` | Edita descrição/valor/categoria/data (não muda conta nem tipo); se o valor mudou, ajusta o saldo pela diferença numa chamada só ao `account-service`; 404 se não for sua; 422 se já cancelada ou saldo insuficiente |
 | `DELETE` | `/api/v1/transacoes/{id}` | `usuario` | Cancela (exclusão lógica) e reverte o efeito no saldo; idempotente; 404 se não for sua; 422 se não der pra reverter (saldo insuficiente) |
+| `POST` | `/api/v1/transacoes-recorrentes` | `usuario` | Cria regra recorrente (só `MENSAL` no v1) e gera a 1ª ocorrência imediatamente; `quantidadeOcorrencias` omitida = indefinida |
+| `GET` | `/api/v1/transacoes-recorrentes` | `usuario` | Lista regras do usuário autenticado — filtro opcional `status` (`ATIVA`\|`PAUSADA`\|`CANCELADA`\|`CONCLUIDA`) |
+| `GET` | `/api/v1/transacoes-recorrentes/proximos-vencimentos` | `service` | [Interno] Próximas ocorrências previstas de todas as regras `ATIVA`, dentro da janela de dias informada (`dias` obrigatório) — consumido pelo futuro `notification-service` (ADR-0010) |
+| `GET` | `/api/v1/transacoes-recorrentes/{id}` | `usuario` | Busca uma regra pelo id; 404 se não for sua |
+| `DELETE` | `/api/v1/transacoes-recorrentes/{id}` | `usuario` | Cancela a regra (exclusão lógica, idempotente) — não afeta ocorrências já geradas |
 
 `usuarioId` também vem sempre do token, mesmo padrão do `account-service`.
 Antes de debitar/creditar, o `transaction-service` confirma que a conta

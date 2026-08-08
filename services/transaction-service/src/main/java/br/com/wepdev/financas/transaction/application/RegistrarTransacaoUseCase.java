@@ -42,7 +42,8 @@ public class RegistrarTransacaoUseCase {
                 command.valor(),
                 command.tipo(),
                 command.categoria(),
-                command.dataTransacao()
+                command.dataTransacao(),
+                command.transacaoRecorrenteId()
         );
         transacaoRepository.salvar(transacao);
         eventPublisher.publicarTransacaoRegistrada(transacao);

@@ -163,6 +163,12 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TransacaoRecorrenteResponse" }
+        "400":
+          description: Campo obrigatório ausente/inválido
+        "404":
+          description: Conta não encontrada (ou não pertence ao usuário)
+        "422":
+          description: Regra de negócio violada na 1ª ocorrência (ex. saldo insuficiente)
     get:
       summary: Lista regras de transação recorrente do usuário autenticado
       security: [{ oidc: [usuario] }]

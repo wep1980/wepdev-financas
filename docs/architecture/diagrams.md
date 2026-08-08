@@ -345,6 +345,81 @@ Regras que esse diagrama expressa:
   operação oposta à original (`DESPESA` → credita de volta, `RECEITA` →
   debita de volta) **antes** de marcar `CANCELADA` — mesma ordem
   "efeito externo primeiro" usada em `criar()`.
+- **Resumo por categoria não chama o `account-service`.**
+  `ResumoPorCategoriaUseCase` só lê `Transacao` já persistida (soma
+  `DESPESA` `CONFIRMADA` num período, agrupada por categoria) — cálculo
+  puramente local, sem efeito colateral externo.
+
+### 4.3 `transaction-service` — `TransacaoRecorrente`
+
+```mermaid
+classDiagram
+    class TransacaoRecorrente {
+        -UUID id
+        -UUID contaId
+        -UUID usuarioId
+        -String descricao
+        -BigDecimal valor
+        -TipoTransacao tipo
+        -String categoria
+        -FrequenciaRecorrencia frequencia
+        -LocalDate dataInicio
+        -Integer quantidadeOcorrencias
+        -int ocorrenciasGeradas
+        -StatusTransacaoRecorrente status
+        -Instant criadoEm
+        +criar(contaId, usuarioId, descricao, valor, tipo, categoria, frequencia, dataInicio, quantidadeOcorrencias)$ TransacaoRecorrente
+        +reconstituir(id, contaId, ...)$ TransacaoRecorrente
+        +proximaDataVencimento() LocalDate
+        +registrarOcorrenciaGerada() void
+        +cancelar() void
+        +isAtiva() boolean
+        +isCancelada() boolean
+    }
+
+    class FrequenciaRecorrencia {
+        <<enumeration>>
+        MENSAL
+    }
+
+    class StatusTransacaoRecorrente {
+        <<enumeration>>
+        ATIVA
+        PAUSADA
+        CANCELADA
+        CONCLUIDA
+    }
+
+    class TransacaoRecorrenteNaoEncontradaException {
+        <<exception>>
+        +TransacaoRecorrenteNaoEncontradaException(id)
+    }
+
+    TransacaoRecorrente "1" *-- "1" FrequenciaRecorrencia : frequencia
+    TransacaoRecorrente "1" *-- "1" StatusTransacaoRecorrente : status
+    TransacaoRecorrente "1" ..> "*" Transacao : gera (transacaoRecorrenteId)
+
+    note for TransacaoRecorrente "Distinta de parcelamento de cartão — conceito próprio\ndo card-service, não reaproveita essa classe (ADR-0009).\nregistrarOcorrenciaGerada() conclui automaticamente ao\natingir quantidadeOcorrencias; null = indefinida, nunca\nconclui sozinha (ex: salário mensal)."
+    note for TransacaoRecorrenteNaoEncontradaException "Mesmo padrão de TransacaoNaoEncontradaException:\nid inexistente OU de outro usuário viram o\nmesmo 404 (evita IDOR)."
+```
+
+Regras que esse diagrama expressa:
+
+- **`CriarTransacaoRecorrenteUseCase` reusa `RegistrarTransacaoUseCase`**
+  pra gerar cada ocorrência — mesmo caminho síncrono com o
+  `account-service` de uma transação avulsa (debita/credita antes de
+  persistir), sem duplicar a lógica de efeito no saldo.
+- **`GerarOcorrenciasRecorrentesJob` (scheduler) é um wrapper fino** sobre
+  `GerarOcorrenciasRecorrentesUseCase`, que recebe a data "hoje" como
+  parâmetro em vez de ler o relógio do sistema — permite testar geração de
+  ocorrência, limite de `quantidadeOcorrencias` e regra indefinida sem
+  `Thread.sleep` nem tempo real. Gera no máximo 1 ocorrência por regra por
+  execução; atraso do job é recuperado incrementalmente nas execuções
+  seguintes, não tudo de uma vez.
+- **Cancelar não afeta ocorrências já geradas.** `cancelar()` só impede
+  novas `Transacao`s de serem criadas pela regra — as que já existem
+  continuam normalmente (têm vida própria, editáveis/canceláveis via
+  `/transacoes/{id}` como qualquer outra).
 
 ## 5. Implantação (produção)
 

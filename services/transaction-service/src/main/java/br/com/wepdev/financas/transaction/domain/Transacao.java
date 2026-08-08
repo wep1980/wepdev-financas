@@ -44,6 +44,12 @@ public class Transacao {
 
     public static Transacao criar(UUID contaId, UUID usuarioId, String descricao, BigDecimal valor, TipoTransacao tipo,
                                    String categoria, LocalDate dataTransacao) {
+        return criar(contaId, usuarioId, descricao, valor, tipo, categoria, dataTransacao, null);
+    }
+
+    /** transacaoRecorrenteId preenchido quando essa ocorrência foi gerada por uma TransacaoRecorrente (ver /transacoes-recorrentes). */
+    public static Transacao criar(UUID contaId, UUID usuarioId, String descricao, BigDecimal valor, TipoTransacao tipo,
+                                   String categoria, LocalDate dataTransacao, UUID transacaoRecorrenteId) {
         Objects.requireNonNull(contaId, "contaId é obrigatório");
         Objects.requireNonNull(usuarioId, "usuarioId é obrigatório");
         Objects.requireNonNull(descricao, "descricao é obrigatória");
@@ -54,7 +60,7 @@ public class Transacao {
         }
         LocalDate data = dataTransacao == null ? LocalDate.now() : dataTransacao;
         return new Transacao(UUID.randomUUID(), contaId, usuarioId, descricao, valor, tipo, categoria, data,
-                StatusTransacao.CONFIRMADA, null, Instant.now());
+                StatusTransacao.CONFIRMADA, transacaoRecorrenteId, Instant.now());
     }
 
     /** Reconstrói uma transação já existente (vinda da persistência) — não valida como se fosse criação nova. */

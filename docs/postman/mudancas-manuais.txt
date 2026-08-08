@@ -205,3 +205,67 @@ GET /api/v1/transacoes/resumo-por-categoria — resumo de gastos por categoria
   - Respostas: 200 / 400 (inicio ou fim ausente, ou inicio depois do fim).
   - Não depende do account-service (só lê o que já está no banco do
     transaction-service).
+
+
+------------------------------------------------------------
+2026-08-08 — transaction-service: transações recorrentes (recurso novo)
+------------------------------------------------------------
+
+POST /api/v1/transacoes-recorrentes — criar regra recorrente
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Header: Content-Type: application/json
+  - Body (raw JSON):
+    {
+      "contaId": "<uuid de uma conta sua>",
+      "descricao": "Salário",
+      "valor": 5000.00,
+      "tipo": "RECEITA",
+      "categoria": "Salário",
+      "frequencia": "MENSAL",
+      "dataInicio": "2026-08-08",
+      "quantidadeOcorrencias": null
+    }
+    (contaId/descricao/valor/tipo/frequencia/dataInicio obrigatórios;
+    categoria opcional; quantidadeOcorrencias omitido/null = indefinida,
+    repete até cancelar — ex. salário. Um número fixo, ex. 24, faz a
+    regra virar CONCLUIDA sozinha depois da última ocorrência)
+  - Gera a 1ª ocorrência (uma Transacao normal, com transacaoRecorrenteId
+    preenchido) IMEDIATAMENTE, síncrono com o account-service — mesmo
+    efeito no saldo de um POST /transacoes comum.
+  - Respostas: 201 (regra criada, corpo já reflete ocorrenciasGeradas=1) /
+    400 (campo obrigatório ausente) /
+    404 (contaId não existe ou não é sua) /
+    422 (saldo insuficiente na 1ª ocorrência, só pra DESPESA)
+  - Importante: o account-service precisa estar rodando também, mesmo
+    motivo do POST /transacoes.
+
+GET /api/v1/transacoes-recorrentes — listar regras
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Query param opcional: status=ATIVA (ou PAUSADA/CANCELADA/CONCLUIDA)
+  - Resposta: 200, lista de regras do usuário autenticado.
+
+GET /api/v1/transacoes-recorrentes/{id} — buscar regra
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Respostas: 200 / 404 (não existe ou não é sua).
+
+DELETE /api/v1/transacoes-recorrentes/{id} — cancelar regra
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Exclusão lógica — NÃO afeta transações já geradas por essa
+    regra (elas continuam existindo, editáveis/canceláveis normalmente via
+    /transacoes/{id}). Idempotente.
+  - Respostas: 204 / 404 (não existe ou não é sua).
+
+GET /api/v1/transacoes-recorrentes/proximos-vencimentos — [endpoint interno]
+  - Auth: OAuth 2.0, token de SERVIÇO (client_credentials, role "service")
+    — mesmo client usado pra testar /contas/{id}/debitos|creditos no
+    account-service, ver seção 1 deste arquivo e docs/postman/README.md.
+  - Sem body. Query param obrigatório: dias=7 (janela de antecedência)
+  - Resposta: 200, lista de próximas ocorrências de TODAS as regras ATIVA
+    de TODOS os usuários dentro da janela — não filtra por usuário porque
+    é consumido pelo futuro notification-service (ADR-0010), que resolve
+    preferência por usuário separadamente.
+  - Não é pra testar com token de usuário normal — dá 403 de propósito.
+
+Job agendado: GerarOcorrenciasRecorrentesJob roda sozinho (cron diário,
+não é um endpoint) e gera a próxima ocorrência de cada regra ATIVA
+vencida — nada a testar manualmente no Postman aqui.
