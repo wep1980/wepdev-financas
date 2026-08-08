@@ -75,5 +75,5 @@ rede.
 src/main/java/br/com/wepdev/financas/transaction/
 ├── domain/           # regra de negócio, sem depender de framework
 ├── application/      # casos de uso, orquestram domain via ports
-└── infrastructure/   # REST, persistência (Panache), Kafka, client HTTP pro account-service
+└── infrastructure/   # REST, persistência (Panache), Kafka, client HTTP pro account-service, scheduling
 ```
