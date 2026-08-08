@@ -264,6 +264,7 @@ classDiagram
         -Instant criadoEm
         +criar(contaId, usuarioId, descricao, valor, tipo, categoria, dataTransacao)$ Transacao
         +reconstituir(id, contaId, ...)$ Transacao
+        +atualizar(descricao, valor, categoria, dataTransacao) void
         +cancelar() void
         +isCancelada() boolean
     }
@@ -302,6 +303,11 @@ classDiagram
         +TransacaoNaoEncontradaException(id)
     }
 
+    class TransacaoCanceladaException {
+        <<exception>>
+        +TransacaoCanceladaException(id)
+    }
+
     Transacao "1" *-- "1" TipoTransacao : tipo
     Transacao "1" *-- "1" StatusTransacao : status
     AccountServiceClient ..> ContaNaoEncontradaException : lança
@@ -309,7 +315,9 @@ classDiagram
 
     note for TransacaoNaoEncontradaException "Mesmo padrão do ContaNaoEncontradaException:\nid inexistente OU de outro usuário viram o\nmesmo 404 (evita IDOR)."
 
-    note for Transacao "Nasce sempre CONFIRMADA — quando criar() roda, o\nefeito no saldo já aconteceu (RegistrarTransacaoUseCase\nchama o account-service ANTES de persistir). PENDENTE\nfica pra um fluxo futuro (ex: importação de documento)."
+    note for TransacaoCanceladaException "Lançada por AtualizarTransacaoUseCase quando o\nchamador tenta editar uma transação já CANCELADA\n(mapeada pra 422 — regra de negócio, não erro de input)."
+
+    note for Transacao "Nasce sempre CONFIRMADA — quando criar() roda, o\nefeito no saldo já aconteceu (RegistrarTransacaoUseCase\nchama o account-service ANTES de persistir). PENDENTE\nfica pra um fluxo futuro (ex: importação de documento).\natualizar() não mexe em contaId/tipo/usuarioId — trocar\nde conta ou tipo é cancelar e recriar (evita ambiguidade\nde reversão de saldo entre contas diferentes)."
     note for AccountServiceClient "Porta pro account-service (chamada síncrona).\nA implementação faz 2 chamadas com 2 tokens diferentes:\nGET /contas/{id} com o token do próprio usuário\n(confirma posse — reusa o 404 do account-service,\nevita IDOR) e POST /contas/{id}/debitos|creditos\ncom token de serviço (client_credentials)."
 ```
 

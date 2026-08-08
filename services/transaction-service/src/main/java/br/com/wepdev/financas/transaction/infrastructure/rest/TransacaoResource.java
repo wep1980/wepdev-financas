@@ -1,11 +1,14 @@
 package br.com.wepdev.financas.transaction.infrastructure.rest;
 
+import br.com.wepdev.financas.transaction.application.AtualizarTransacaoCommand;
+import br.com.wepdev.financas.transaction.application.AtualizarTransacaoUseCase;
 import br.com.wepdev.financas.transaction.application.CancelarTransacaoUseCase;
 import br.com.wepdev.financas.transaction.application.ListarTransacoesUseCase;
 import br.com.wepdev.financas.transaction.application.RegistrarTransacaoCommand;
 import br.com.wepdev.financas.transaction.application.RegistrarTransacaoUseCase;
 import br.com.wepdev.financas.transaction.domain.Transacao;
 import br.com.wepdev.financas.transaction.domain.TransacaoFiltro;
+import br.com.wepdev.financas.transaction.infrastructure.rest.dto.AtualizarTransacaoRequest;
 import br.com.wepdev.financas.transaction.infrastructure.rest.dto.CriarTransacaoRequest;
 import br.com.wepdev.financas.transaction.infrastructure.rest.dto.TransacaoResponse;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -15,6 +18,7 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -33,14 +37,17 @@ public class TransacaoResource {
 
     private final RegistrarTransacaoUseCase registrarTransacaoUseCase;
     private final ListarTransacoesUseCase listarTransacoesUseCase;
+    private final AtualizarTransacaoUseCase atualizarTransacaoUseCase;
     private final CancelarTransacaoUseCase cancelarTransacaoUseCase;
     private final SecurityIdentity identity;
 
     public TransacaoResource(RegistrarTransacaoUseCase registrarTransacaoUseCase,
                               ListarTransacoesUseCase listarTransacoesUseCase,
+                              AtualizarTransacaoUseCase atualizarTransacaoUseCase,
                               CancelarTransacaoUseCase cancelarTransacaoUseCase, SecurityIdentity identity) {
         this.registrarTransacaoUseCase = registrarTransacaoUseCase;
         this.listarTransacoesUseCase = listarTransacoesUseCase;
+        this.atualizarTransacaoUseCase = atualizarTransacaoUseCase;
         this.cancelarTransacaoUseCase = cancelarTransacaoUseCase;
         this.identity = identity;
     }
@@ -74,6 +81,18 @@ public class TransacaoResource {
         return listarTransacoesUseCase.executar(filtro).stream()
                 .map(TransacaoResponse::de)
                 .toList();
+    }
+
+    @PUT
+    @Path("/{id}")
+    @RolesAllowed("usuario")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public TransacaoResponse atualizar(@PathParam("id") UUID id, @Valid AtualizarTransacaoRequest request) {
+        Transacao transacao = atualizarTransacaoUseCase.executar(new AtualizarTransacaoCommand(
+                id, usuarioIdAutenticado(), request.descricao(), request.valor(), request.categoria(), request.dataTransacao()
+        ));
+        return TransacaoResponse.de(transacao);
     }
 
     @DELETE

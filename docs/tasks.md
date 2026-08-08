@@ -11,11 +11,12 @@ Specs já existem: `docs/specs/account-service.yaml`,
 `docs/specs/transaction-service.yaml`. `account-service` tem **CRUD
 completo** (criar/listar/buscar/atualizar/excluir) + ajuste de saldo
 (débito/crédito) funcionando ponta a ponta, com teste. `transaction-service`
-tem **registrar**, **listar** e **cancelar transação** funcionando ponta a
-ponta contra o `account-service` real, inclusive via `docker compose up`
-com autenticação de verdade (issuer do Keycloak corrigido) — 2026-08-07.
-Falta CI e o resto dos casos de uso de `transaction-service`
-(editar/resumo/recorrentes).
+tem **registrar**, **listar**, **cancelar** e **editar transação**
+funcionando ponta a ponta contra o `account-service` real, inclusive via
+`docker compose up` com autenticação de verdade (issuer do Keycloak
+corrigido) — 2026-08-07/08. CI já existe e está verde (só falta a
+ativação externa da `NVD_API_KEY`, ver seção de CI/CD). Falta o resto dos
+casos de uso de `transaction-service` (resumo por categoria/recorrentes).
 
 ### `account-service`
 
@@ -182,11 +183,21 @@ Falta CI e o resto dos casos de uso de `transaction-service`
       `TransacaoResourceTest` (`@QuarkusTest`, cobre 201/400/404/422,
       listagem com filtro/isolamento por usuário, cancelamento com
       reversão/idempotência/dono). 28 testes, todos passando.
-- [ ] Caso de uso: editar transação (`PUT /transacoes/{id}`) — se valor mudou
-      e a transação já estava `CONFIRMADA`, reverte o efeito antigo no saldo
-      e aplica o novo, síncrono com `account-service`. Testar especificamente
-      o caso de falha do `account-service` no meio do ajuste (não pode deixar
-      saldo inconsistente).
+- [x] Caso de uso: **editar transação** (`AtualizarTransacaoUseCase`,
+      `PUT /api/v1/transacoes/{id}`) — descricao/valor/categoria/dataTransacao
+      editáveis; `contaId`/`tipo`/`usuarioId` não (trocar de conta ou tipo é
+      cancelar e recriar, evita ambiguidade de reversão entre contas
+      diferentes). Se o valor mudou, ajusta o saldo pela DIFERENÇA (delta)
+      numa chamada só ao `account-service` (não reverte-e-reaplica em duas
+      chamadas — evita janela de inconsistência se a segunda falhasse). 422
+      se a transação já estava `CANCELADA` (`TransacaoCanceladaException`,
+      nova). 404 pra id inexistente ou de outro usuário (mesmo padrão
+      anti-IDOR). Validado de ponta a ponta via containers reais: despesa de
+      100 numa conta de 1000 → editar pra 150 (debita +50, saldo 850) →
+      editar pra 60 (credita 90, saldo 940) → cancelar → editar de novo dá
+      422. 9 testes unitários (`AtualizarTransacaoUseCaseTest`) + 7 de
+      integração (`TransacaoResourceTest`), todos passando (47 no total do
+      serviço, sem regressão no `account-service`).
 - [ ] Caso de uso: resumo por categoria (`GET /transacoes/resumo-por-categoria`)
       — agregação usada pelo dashboard (fatia 6) e pela tool de IA (fatia 5);
       implementar uma vez, os dois consumidores chamam o mesmo endpoint.

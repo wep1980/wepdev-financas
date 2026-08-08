@@ -634,3 +634,89 @@ que ele tiver o valor.
 Criado/alterado: `.github/workflows/ci.yml` (bloco `permissions`);
 `README.md` (badge de CI); `docs/tasks.md`. 9 PRs do Dependabot comentadas
 (`@dependabot rebase`, duas rodadas).
+
+## 2026-08-07 — Documentação de GUIs/URLs, guia de Postman e conexão com GitHub
+
+Pedido (três partes numa mensagem só): documentar Keycloak e todas as
+interfaces gráficas acessíveis via Docker (dev e produção); criar um
+passo a passo de tudo que precisa ser feito pra testar o sistema inteiro
+no Postman; explicar como liberar acesso da IA ao GitHub do usuário e o
+que dá pra configurar com esse acesso.
+
+Criado: `docs/architecture/interfaces-graficas.md` (Keycloak :8080,
+Kafka UI :8090, Grafana :3001, Prometheus :9090, Dev UI/Swagger dos dois
+serviços — dev e produção, com placeholder de domínio); reescrita de
+`docs/postman/README.md` (guia 0-6: pré-requisitos → import → token de
+usuário → token de serviço → roteiro fim-a-fim de 9 passos → erros
+comuns). Expliquei que o acesso ao GitHub seria via `gh` CLI autenticado
+localmente, não um token/app compartilhado.
+
+Sessões seguintes (mesmo dia): usuário pediu login no GitHub passo a
+passo; instalação do `gh` CLI **via PowerShell** (não download manual) —
+instalado sem privilégio de admin usando o `.zip` portátil (não o
+`.msi`, que pede elevação), extraído em
+`%LOCALAPPDATA%\Programs\gh\bin`, PATH de usuário atualizado (só vale
+pra processos novos, não pro processo da sessão já aberta — precisei
+usar caminho completo ou `export PATH=...` no Bash daqui pra frente).
+`gh auth login` é interativo, rodado pelo usuário num terminal separado;
+primeira tentativa não persistiu (fechou o terminal antes da confirmação
+"Logged in as..."), segunda tentativa funcionou. Repositório
+`wepdev-financas` criado como privado no GitHub, remoto conectado, push
+inicial feito.
+
+Depois disso, pedido explícito: "tudo que você conseguir fazer sozinho
+no GitHub, faça; o que não conseguir, explique passo a passo." Configurei
+sozinho: branch `main` (renomeada de `master`), CI (`.github/workflows/ci.yml`,
+ver entradas acima), `.github/dependabot.yml`, e o secret `NVD_API_KEY`
+nos **dois** stores do GitHub que existem pra isso — `gh secret set
+NVD_API_KEY --app actions` (Actions normais) e `--app dependabot`
+(store separado, só descoberto porque as PRs do Dependabot continuavam
+vendo a chave vazia mesmo com o primeiro configurado). O valor da chave em
+si (cadastro pessoal, amarrado ao e-mail do usuário no site da NVD/NIST)
+não é algo que eu deva gerar — o usuário colou o valor depois de se
+cadastrar. Ficou pendente a ativação da chave (confirmação por e-mail):
+o usuário reportou que o link de confirmação da NVD não abria; testei via
+`curl`/`WebFetch` e confirmei 403/502 vindos do próprio site nvd.nist.gov
+(instabilidade do lado deles, não erro de configuração nossa) —
+combinamos deixar isso de lado e voltar pra implementação de
+funcionalidades; CI segue verde exceto o scan de vulnerabilidade, que
+falha só por causa dessa chave não ativada.
+
+Criado/alterado: `docs/architecture/interfaces-graficas.md` (novo);
+`docs/postman/README.md` (reescrito); `docs/architecture/security.md`
+(linha da `NVD_API_KEY` no inventário de credenciais); `.github/dependabot.yml`;
+`docs/tasks.md`; `README.md`.
+
+## 2026-08-08 — Editar transação (`PUT /transacoes/{id}`)
+
+Pedido: "certo, podemos voltar à implementação" (depois de deixar a
+pendência da `NVD_API_KEY` de lado). Escolhi seguir com **editar
+transação** como próximo passo natural do CRUD de `transaction-service`
+(registrar → listar → cancelar → editar), como nas sessões anteriores em
+que o usuário pediu pra eu escolher o próximo passo.
+
+Implementado: `Transacao.atualizar(descricao, valor, categoria,
+dataTransacao)` — `contaId`/`tipo`/`usuarioId` não são editáveis de
+propósito (trocar de conta/tipo é cancelar e recriar, evita ambiguidade
+de reversão de saldo entre contas diferentes); `TransacaoCanceladaException`
+(nova, 422) pra impedir editar uma transação já cancelada;
+`AtualizarTransacaoUseCase` — se o valor mudou, ajusta o saldo pela
+**diferença líquida (delta)** numa chamada só ao `account-service`, em
+vez de reverter-e-reaplicar em duas chamadas (evita uma janela de
+inconsistência se a segunda chamada falhasse); endpoint `PUT
+/api/v1/transacoes/{id}`. 9 testes unitários novos
+(`AtualizarTransacaoUseCaseTest`) + 7 de integração (`TransacaoResourceTest`,
+cobrindo delta pra cima/baixo, sem mudança de valor, 404 inexistente/de
+outro usuário, 422 cancelada, 400 validação) — 47 testes no total do
+serviço, todos passando; `account-service` sem regressão (45 testes).
+Validado de ponta a ponta contra containers reais (rebuild + `docker
+compose up`): conta com saldo 1000 → despesa de 100 → editar pra 150
+(debita +50, saldo 850) → editar pra 60 (credita 90, saldo 940) →
+cancelar → tentar editar de novo dá 422.
+
+Criado/alterado: `docs/specs/transaction-service.yaml` (`required:
+[descricao, valor]` em `AtualizarTransacaoRequest`, resposta 400
+documentada, 422 ampliado pra mencionar transação cancelada);
+`docs/architecture/diagrams.md` (seção 4.2 — `atualizar()` em `Transacao`,
+nova classe `TransacaoCanceladaException`); `docs/postman/mudancas-manuais.txt`
+(entrada nova pro PUT); `docs/tasks.md`.

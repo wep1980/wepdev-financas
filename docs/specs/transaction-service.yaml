@@ -108,10 +108,14 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TransacaoResponse" }
+        "400":
+          description: Campo obrigatório ausente ou inválido (descricao, valor)
         "404":
-          description: Transação não encontrada
+          description: Transação não encontrada (ou pertence a outro usuário)
         "422":
-          description: Regra de negócio violada (ex. saldo insuficiente após ajuste)
+          description: >
+            Regra de negócio violada: transação já cancelada (não pode ser
+            editada) ou saldo insuficiente após ajuste da diferença de valor.
     delete:
       summary: >
         Cancela uma transação (exclusão lógica; reverte efeito no saldo,
@@ -264,6 +268,7 @@ components:
         Campos editáveis de uma transação. contaId e tipo não são editáveis
         aqui de propósito — trocar de conta/tipo é cancelar e recriar, evita
         ambiguidade de reversão de saldo entre contas diferentes.
+      required: [descricao, valor]
       properties:
         descricao: { type: string }
         valor: { type: number, format: decimal }

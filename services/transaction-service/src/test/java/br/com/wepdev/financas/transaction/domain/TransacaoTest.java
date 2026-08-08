@@ -61,4 +61,36 @@ class TransacaoTest {
         assertThat(transacao.getStatus()).isEqualTo(StatusTransacao.CANCELADA);
         assertThat(transacao.isCancelada()).isTrue();
     }
+
+    @Test
+    void deveriaAtualizarCamposEditaveis() {
+        Transacao transacao = Transacao.criar(contaId, usuarioId, "Mercado", new BigDecimal("100.00"),
+                TipoTransacao.DESPESA, "Alimentação", LocalDate.of(2026, 8, 1));
+
+        transacao.atualizar("Mercado (ajustado)", new BigDecimal("150.00"), "Casa", LocalDate.of(2026, 8, 2));
+
+        assertThat(transacao.getDescricao()).isEqualTo("Mercado (ajustado)");
+        assertThat(transacao.getValor()).isEqualByComparingTo("150.00");
+        assertThat(transacao.getCategoria()).isEqualTo("Casa");
+        assertThat(transacao.getDataTransacao()).isEqualTo(LocalDate.of(2026, 8, 2));
+    }
+
+    @Test
+    void deveriaManterDataAtual_quandoAtualizarSemInformarNovaData() {
+        Transacao transacao = Transacao.criar(contaId, usuarioId, "Mercado", new BigDecimal("100.00"),
+                TipoTransacao.DESPESA, "Alimentação", LocalDate.of(2026, 8, 1));
+
+        transacao.atualizar("Mercado", new BigDecimal("100.00"), "Alimentação", null);
+
+        assertThat(transacao.getDataTransacao()).isEqualTo(LocalDate.of(2026, 8, 1));
+    }
+
+    @Test
+    void deveriaLancarExcecao_quandoAtualizarComValorZeroOuNegativo() {
+        Transacao transacao = Transacao.criar(contaId, usuarioId, "Mercado", new BigDecimal("100.00"),
+                TipoTransacao.DESPESA, "Alimentação", null);
+
+        assertThatThrownBy(() -> transacao.atualizar("Mercado", BigDecimal.ZERO, "Alimentação", null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

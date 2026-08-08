@@ -148,3 +148,34 @@ DELETE /api/v1/transacoes/{id} — cancelar transação
     sem reverter o saldo outra vez.
   - Importante: o account-service precisa estar rodando também, mesmo
     motivo do POST.
+
+
+------------------------------------------------------------
+2026-08-08 — transaction-service: editar transação (endpoint novo)
+------------------------------------------------------------
+
+PUT /api/v1/transacoes/{id} — editar transação
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Header: Content-Type: application/json
+  - {id} é o "id" que veio na resposta do POST /transacoes.
+  - Body (raw JSON):
+    {
+      "descricao": "Mercado maior",
+      "valor": 150.00,
+      "categoria": "Alimentação",
+      "dataTransacao": "2026-08-08"
+    }
+    (descricao e valor são obrigatórios; categoria e dataTransacao
+    opcionais — dataTransacao omitida mantém a data já gravada)
+  - contaId e tipo NÃO são editáveis por este endpoint — pra trocar de
+    conta ou tipo, cancele a transação e crie outra (evita ambiguidade de
+    reversão de saldo entre contas diferentes).
+  - Se o valor mudou, ajusta o saldo pela DIFERENÇA (delta) numa chamada
+    só ao account-service — não reverte-e-reaplica em duas chamadas.
+  - Respostas: 200 (atualizada, corpo com a transação) /
+    400 (descricao ou valor ausente/inválido) /
+    404 (não existe ou não é sua) /
+    422 (transação já cancelada — não pode ser editada; ou saldo
+    insuficiente após ajustar a diferença de valor)
+  - Importante: o account-service precisa estar rodando também, mesmo
+    motivo do POST/DELETE.

@@ -6,6 +6,7 @@ import br.com.wepdev.financas.transaction.domain.Transacao;
 import br.com.wepdev.financas.transaction.domain.TransacaoRepository;
 import br.com.wepdev.financas.transaction.domain.TipoTransacao;
 import br.com.wepdev.financas.transaction.infrastructure.client.AccountServiceClientImpl;
+import br.com.wepdev.financas.transaction.infrastructure.rest.dto.AtualizarTransacaoRequest;
 import br.com.wepdev.financas.transaction.infrastructure.rest.dto.CriarTransacaoRequest;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
@@ -216,6 +217,139 @@ class TransacaoResourceTest {
         .then()
                 .statusCode(200)
                 .body("size()", equalTo(0));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaAtualizarTransacao_eDebitarDelta_quandoValorAumenta() {
+        UUID contaId = UUID.randomUUID();
+        String id = registrarTransacaoEObterId(contaId, "Mercado", TipoTransacao.DESPESA, new BigDecimal("100.00"));
+
+        AtualizarTransacaoRequest request = new AtualizarTransacaoRequest("Mercado maior", new BigDecimal("150.00"), "Alimentação", null);
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .put("/api/v1/transacoes/{id}", id)
+        .then()
+                .statusCode(200)
+                .body("descricao", equalTo("Mercado maior"))
+                .body("valor", equalTo(150.00f));
+
+        verify(accountServiceClientMock).debitar(eq(contaId), eq(new BigDecimal("50.00")));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaAtualizarTransacao_eCreditarDelta_quandoValorDiminui() {
+        UUID contaId = UUID.randomUUID();
+        String id = registrarTransacaoEObterId(contaId, "Mercado", TipoTransacao.DESPESA, new BigDecimal("100.00"));
+
+        AtualizarTransacaoRequest request = new AtualizarTransacaoRequest("Mercado menor", new BigDecimal("60.00"), "Alimentação", null);
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .put("/api/v1/transacoes/{id}", id)
+        .then()
+                .statusCode(200)
+                .body("valor", equalTo(60.00f));
+
+        verify(accountServiceClientMock).creditar(eq(contaId), eq(new BigDecimal("40.00")));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void naoDeveriaChamarAccountService_quandoAtualizarSemMudarValor() {
+        UUID contaId = UUID.randomUUID();
+        String id = registrarTransacaoEObterId(contaId, "Mercado", TipoTransacao.DESPESA, new BigDecimal("100.00"));
+
+        AtualizarTransacaoRequest request = new AtualizarTransacaoRequest("Mercado renomeado", new BigDecimal("100.00"), "Alimentação", null);
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .put("/api/v1/transacoes/{id}", id)
+        .then()
+                .statusCode(200)
+                .body("descricao", equalTo("Mercado renomeado"));
+
+        verify(accountServiceClientMock, times(0)).creditar(any(), any());
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaRetornar404_quandoAtualizarTransacaoInexistente() {
+        AtualizarTransacaoRequest request = new AtualizarTransacaoRequest("Mercado", new BigDecimal("100.00"), "Alimentação", null);
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .put("/api/v1/transacoes/{id}", UUID.randomUUID())
+        .then()
+                .statusCode(404);
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaRetornar404_quandoAtualizarTransacaoDeOutroUsuario() {
+        UUID id = criarTransacaoDireto(UUID.randomUUID());
+        AtualizarTransacaoRequest request = new AtualizarTransacaoRequest("Mercado", new BigDecimal("100.00"), "Alimentação", null);
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .put("/api/v1/transacoes/{id}", id)
+        .then()
+                .statusCode(404);
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaRetornar422_quandoAtualizarTransacaoCancelada() {
+        String id = registrarTransacaoEObterId(UUID.randomUUID(), "Mercado", TipoTransacao.DESPESA, new BigDecimal("100.00"));
+        given().when().delete("/api/v1/transacoes/{id}", id).then().statusCode(204);
+
+        AtualizarTransacaoRequest request = new AtualizarTransacaoRequest("Mercado", new BigDecimal("150.00"), "Alimentação", null);
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .put("/api/v1/transacoes/{id}", id)
+        .then()
+                .statusCode(422)
+                .body("mensagem", notNullValue());
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaRetornar400_quandoAtualizarComDescricaoAusente() {
+        String id = registrarTransacaoEObterId(UUID.randomUUID(), "Mercado", TipoTransacao.DESPESA, new BigDecimal("100.00"));
+        String jsonInvalido = """
+                {"valor": 100.00}
+                """;
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(jsonInvalido)
+        .when()
+                .put("/api/v1/transacoes/{id}", id)
+        .then()
+                .statusCode(400)
+                .body("erros[0].campo", equalTo("descricao"));
     }
 
     @Test

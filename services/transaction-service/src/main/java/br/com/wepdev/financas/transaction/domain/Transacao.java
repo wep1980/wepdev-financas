@@ -65,6 +65,21 @@ public class Transacao {
                 transacaoRecorrenteId, criadoEm);
     }
 
+    /** contaId, tipo e usuarioId não são editáveis — trocar de conta/tipo é cancelar e recriar (evita ambiguidade de reversão entre contas diferentes). */
+    public void atualizar(String descricao, BigDecimal valor, String categoria, LocalDate dataTransacao) {
+        Objects.requireNonNull(descricao, "descricao é obrigatória");
+        Objects.requireNonNull(valor, "valor é obrigatório");
+        if (valor.signum() <= 0) {
+            throw new IllegalArgumentException("valor precisa ser positivo");
+        }
+        this.descricao = descricao;
+        this.valor = valor;
+        this.categoria = categoria;
+        if (dataTransacao != null) {
+            this.dataTransacao = dataTransacao;
+        }
+    }
+
     /** Idempotente — cancelar de novo uma transação já cancelada é um no-op, o chamador decide se reverte saldo. */
     public void cancelar() {
         status = StatusTransacao.CANCELADA;
