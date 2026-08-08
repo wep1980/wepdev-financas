@@ -134,6 +134,7 @@ Contrato completo em [`docs/specs/transaction-service.yaml`](docs/specs/transact
 |---|---|---|---|
 | `POST` | `/api/v1/transacoes` | `usuario` | Registra transação (receita/despesa) — chama o `account-service` de forma síncrona antes de persistir; 404 se a conta não for sua, 422 se saldo insuficiente |
 | `GET` | `/api/v1/transacoes` | `usuario` | Lista transações do usuário autenticado — filtros opcionais `contaId`, `inicio`, `fim` |
+| `GET` | `/api/v1/transacoes/resumo-por-categoria` | `usuario` | Soma DESPESA confirmada por categoria num período (`inicio`/`fim` obrigatórios); inclui `percentualDoTotal` e comparação com o período anterior de mesma duração; 400 se `inicio` depois de `fim` |
 | `PUT` | `/api/v1/transacoes/{id}` | `usuario` | Edita descrição/valor/categoria/data (não muda conta nem tipo); se o valor mudou, ajusta o saldo pela diferença numa chamada só ao `account-service`; 404 se não for sua; 422 se já cancelada ou saldo insuficiente |
 | `DELETE` | `/api/v1/transacoes/{id}` | `usuario` | Cancela (exclusão lógica) e reverte o efeito no saldo; idempotente; 404 se não for sua; 422 se não der pra reverter (saldo insuficiente) |
 

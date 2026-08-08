@@ -6,14 +6,17 @@ import br.com.wepdev.financas.transaction.application.CancelarTransacaoUseCase;
 import br.com.wepdev.financas.transaction.application.ListarTransacoesUseCase;
 import br.com.wepdev.financas.transaction.application.RegistrarTransacaoCommand;
 import br.com.wepdev.financas.transaction.application.RegistrarTransacaoUseCase;
+import br.com.wepdev.financas.transaction.application.ResumoPorCategoriaUseCase;
 import br.com.wepdev.financas.transaction.domain.Transacao;
 import br.com.wepdev.financas.transaction.domain.TransacaoFiltro;
 import br.com.wepdev.financas.transaction.infrastructure.rest.dto.AtualizarTransacaoRequest;
 import br.com.wepdev.financas.transaction.infrastructure.rest.dto.CriarTransacaoRequest;
+import br.com.wepdev.financas.transaction.infrastructure.rest.dto.ResumoCategoriaResponse;
 import br.com.wepdev.financas.transaction.infrastructure.rest.dto.TransacaoResponse;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -39,16 +42,20 @@ public class TransacaoResource {
     private final ListarTransacoesUseCase listarTransacoesUseCase;
     private final AtualizarTransacaoUseCase atualizarTransacaoUseCase;
     private final CancelarTransacaoUseCase cancelarTransacaoUseCase;
+    private final ResumoPorCategoriaUseCase resumoPorCategoriaUseCase;
     private final SecurityIdentity identity;
 
     public TransacaoResource(RegistrarTransacaoUseCase registrarTransacaoUseCase,
                               ListarTransacoesUseCase listarTransacoesUseCase,
                               AtualizarTransacaoUseCase atualizarTransacaoUseCase,
-                              CancelarTransacaoUseCase cancelarTransacaoUseCase, SecurityIdentity identity) {
+                              CancelarTransacaoUseCase cancelarTransacaoUseCase,
+                              ResumoPorCategoriaUseCase resumoPorCategoriaUseCase,
+                              SecurityIdentity identity) {
         this.registrarTransacaoUseCase = registrarTransacaoUseCase;
         this.listarTransacoesUseCase = listarTransacoesUseCase;
         this.atualizarTransacaoUseCase = atualizarTransacaoUseCase;
         this.cancelarTransacaoUseCase = cancelarTransacaoUseCase;
+        this.resumoPorCategoriaUseCase = resumoPorCategoriaUseCase;
         this.identity = identity;
     }
 
@@ -80,6 +87,17 @@ public class TransacaoResource {
         TransacaoFiltro filtro = new TransacaoFiltro(usuarioIdAutenticado(), contaId, inicio, fim);
         return listarTransacoesUseCase.executar(filtro).stream()
                 .map(TransacaoResponse::de)
+                .toList();
+    }
+
+    @GET
+    @Path("/resumo-por-categoria")
+    @RolesAllowed("usuario")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<ResumoCategoriaResponse> resumoPorCategoria(@NotNull @QueryParam("inicio") LocalDate inicio,
+                                                              @NotNull @QueryParam("fim") LocalDate fim) {
+        return resumoPorCategoriaUseCase.executar(usuarioIdAutenticado(), inicio, fim).stream()
+                .map(ResumoCategoriaResponse::de)
                 .toList();
     }
 

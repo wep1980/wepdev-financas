@@ -720,3 +720,46 @@ documentada, 422 ampliado pra mencionar transação cancelada);
 `docs/architecture/diagrams.md` (seção 4.2 — `atualizar()` em `Transacao`,
 nova classe `TransacaoCanceladaException`); `docs/postman/mudancas-manuais.txt`
 (entrada nova pro PUT); `docs/tasks.md`.
+
+Depois do commit/push, o usuário mandou a `NVD_API_KEY` que tinha acabado
+de gerar (segunda tentativa, chave diferente da primeira que ficou presa
+na confirmação por e-mail). Atualizei o secret nos dois stores do GitHub
+(`gh secret set NVD_API_KEY --app actions` e `--app dependabot`) e
+re-executei só o job que falha (`gh run rerun --failed`) pra testar sem
+esperar um push novo.
+
+## 2026-08-08 — Resumo por categoria (`GET /transacoes/resumo-por-categoria`)
+
+Pedido: "vamos para o próximo passo" (escolhido por mim, seguindo o
+backlog: com o CRUD de transação completo, o próximo item natural era o
+endpoint de agregação já espec'ado, consumido depois pelo dashboard e pela
+tool de IA).
+
+Implementado: `ResumoPorCategoriaUseCase` — soma só `DESPESA` com status
+`CONFIRMADA` num período (`RECEITA` e transação `CANCELADA` não contam);
+transação sem categoria agrupa em "Sem categoria"; `percentualDoTotal`
+calculado sobre o total gasto do próprio período; `totalGastoPeriodoAnterior`
+compara com o período imediatamente anterior de mesma duração em dias
+(nulo se a categoria não teve gasto nele); `IntervaloInvalidoException`
+(nova, 400) se `início` vier depois do `fim`. `inicio`/`fim` viraram
+`@NotNull` direto nos `@QueryParam` do endpoint (primeira vez nesse
+serviço validando parâmetro de query, não só corpo — funcionou de graça
+porque o `ConstraintViolationExceptionMapper` já existente também cobre
+violação de parâmetro de método, não só `@Valid` no body).
+
+Bug achado pelo próprio teste (não em produção): a ordenação por
+`totalGasto` decrescente ficava não-determinística quando duas categorias
+empatavam no total, porque o agrupamento usa `HashMap` internamente (sem
+ordem garantida). Corrigido com desempate por nome da categoria
+(`.thenComparing(categoria)`).
+
+7 testes unitários (`ResumoPorCategoriaUseCaseTest`) + 5 de integração
+(`TransacaoResourceTest`) — 59 testes no total do serviço, todos passando.
+Validado de ponta a ponta contra containers reais: 150 de Alimentação + 50
+de Transporte + 3000 de Receita (ignorada) num período → resumo retorna
+Alimentação 75%, Transporte 25%; confirmei também que a rota literal
+`/resumo-por-categoria` não conflita com `/{id}` (JAX-RS prioriza segmento
+literal sobre variável de path automaticamente).
+
+Criado/alterado: `docs/specs/transaction-service.yaml` (resposta 400
+documentada no endpoint); `docs/tasks.md`.

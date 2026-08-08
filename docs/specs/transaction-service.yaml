@@ -76,12 +76,19 @@ paths:
           schema: { type: string, format: date }
       responses:
         "200":
-          description: Total gasto por categoria no período, maior primeiro
+          description: >
+            Total gasto por categoria no período, maior primeiro (empate
+            desempatado por ordem alfabética da categoria). Só conta
+            DESPESA com status CONFIRMADA — RECEITA e transação CANCELADA
+            não entram na soma. Transação sem categoria agrupa em
+            "Sem categoria".
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/ResumoCategoriaResponse" }
+        "400":
+          description: inicio/fim ausente ou inicio posterior a fim
 
   /api/v1/transacoes/{id}:
     put:

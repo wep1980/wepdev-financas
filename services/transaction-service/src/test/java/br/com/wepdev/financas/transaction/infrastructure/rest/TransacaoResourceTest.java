@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -48,6 +49,7 @@ class TransacaoResourceTest {
     // base entre métodos, sem rollback automático).
     private static final String SUB_LISTAGEM_1 = "b20c1000-0000-4000-8000-000000000002";
     private static final String SUB_LISTAGEM_2 = "b20c1000-0000-4000-8000-000000000003";
+    private static final String SUB_RESUMO = "b20c1000-0000-4000-8000-000000000004";
 
     @Inject
     TransacaoRepository transacaoRepository;
@@ -217,6 +219,94 @@ class TransacaoResourceTest {
         .then()
                 .statusCode(200)
                 .body("size()", equalTo(0));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_RESUMO))
+    void deveriaAgruparGastosPorCategoria_eCalcularPercentual() {
+        UUID contaId = UUID.randomUUID();
+        registrarTransacaoComData(contaId, "Mercado 1", TipoTransacao.DESPESA, new BigDecimal("80.00"), "Alimentação", LocalDate.of(2020, 1, 5));
+        registrarTransacaoComData(contaId, "Mercado 2", TipoTransacao.DESPESA, new BigDecimal("20.00"), "Alimentação", LocalDate.of(2020, 1, 10));
+        registrarTransacaoComData(contaId, "Uber", TipoTransacao.DESPESA, new BigDecimal("100.00"), "Transporte", LocalDate.of(2020, 1, 15));
+
+        given()
+                .queryParam("inicio", "2020-01-01")
+                .queryParam("fim", "2020-01-31")
+        .when()
+                .get("/api/v1/transacoes/resumo-por-categoria")
+        .then()
+                .statusCode(200)
+                .body("size()", equalTo(2))
+                .body("[0].categoria", equalTo("Alimentação"))
+                .body("[0].totalGasto", equalTo(100.00f))
+                .body("[0].percentualDoTotal", equalTo(50.00f))
+                .body("[1].categoria", equalTo("Transporte"))
+                .body("[1].totalGasto", equalTo(100.00f));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_RESUMO))
+    void deveriaIgnorarReceitaETransacaoCancelada_noResumo() {
+        UUID contaId = UUID.randomUUID();
+        registrarTransacaoComData(contaId, "Salário", TipoTransacao.RECEITA, new BigDecimal("5000.00"), "Salário", LocalDate.of(2020, 2, 5));
+        String idCancelada = registrarTransacaoEObterIdComData(contaId, "Mercado", TipoTransacao.DESPESA, new BigDecimal("50.00"), "Alimentação", LocalDate.of(2020, 2, 10));
+        given().when().delete("/api/v1/transacoes/{id}", idCancelada).then().statusCode(204);
+
+        given()
+                .queryParam("inicio", "2020-02-01")
+                .queryParam("fim", "2020-02-28")
+        .when()
+                .get("/api/v1/transacoes/resumo-por-categoria")
+        .then()
+                .statusCode(200)
+                .body("size()", equalTo(0));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_RESUMO))
+    void devePreencherTotalGastoPeriodoAnterior_quandoCategoriaExistiaAntes() {
+        UUID contaId = UUID.randomUUID();
+        registrarTransacaoComData(contaId, "Mercado abril", TipoTransacao.DESPESA, new BigDecimal("100.00"), "Alimentação", LocalDate.of(2020, 4, 15));
+        registrarTransacaoComData(contaId, "Mercado marco", TipoTransacao.DESPESA, new BigDecimal("80.00"), "Alimentação", LocalDate.of(2020, 3, 15));
+
+        given()
+                .queryParam("inicio", "2020-04-01")
+                .queryParam("fim", "2020-04-30")
+        .when()
+                .get("/api/v1/transacoes/resumo-por-categoria")
+        .then()
+                .statusCode(200)
+                .body("size()", equalTo(1))
+                .body("[0].totalGasto", equalTo(100.00f))
+                .body("[0].totalGastoPeriodoAnterior", equalTo(80.00f));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_RESUMO))
+    void deveriaRetornar400_quandoInicioDepoisDoFim() {
+        given()
+                .queryParam("inicio", "2020-05-31")
+                .queryParam("fim", "2020-05-01")
+        .when()
+                .get("/api/v1/transacoes/resumo-por-categoria")
+        .then()
+                .statusCode(400);
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_RESUMO))
+    void deveriaRetornar400_quandoInicioOuFimAusente() {
+        given()
+                .queryParam("inicio", "2020-05-01")
+        .when()
+                .get("/api/v1/transacoes/resumo-por-categoria")
+        .then()
+                .statusCode(400);
     }
 
     @Test
@@ -409,6 +499,24 @@ class TransacaoResourceTest {
 
     private String registrarTransacaoEObterId(UUID contaId, String descricao, TipoTransacao tipo, BigDecimal valor) {
         CriarTransacaoRequest request = new CriarTransacaoRequest(contaId, descricao, valor, tipo, "Categoria", null);
+        return given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .post("/api/v1/transacoes")
+        .then()
+                .statusCode(201)
+                .extract().path("id");
+    }
+
+    private void registrarTransacaoComData(UUID contaId, String descricao, TipoTransacao tipo, BigDecimal valor,
+                                            String categoria, LocalDate data) {
+        registrarTransacaoEObterIdComData(contaId, descricao, tipo, valor, categoria, data);
+    }
+
+    private String registrarTransacaoEObterIdComData(UUID contaId, String descricao, TipoTransacao tipo, BigDecimal valor,
+                                                       String categoria, LocalDate data) {
+        CriarTransacaoRequest request = new CriarTransacaoRequest(contaId, descricao, valor, tipo, categoria, data);
         return given()
                 .contentType(ContentType.JSON)
                 .body(request)

@@ -179,3 +179,29 @@ PUT /api/v1/transacoes/{id} — editar transação
     insuficiente após ajustar a diferença de valor)
   - Importante: o account-service precisa estar rodando também, mesmo
     motivo do POST/DELETE.
+
+
+------------------------------------------------------------
+2026-08-08 — transaction-service: resumo por categoria (endpoint novo)
+------------------------------------------------------------
+
+GET /api/v1/transacoes/resumo-por-categoria — resumo de gastos por categoria
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Query params obrigatórios:
+    inicio=2026-08-01   (data, formato AAAA-MM-DD)
+    fim=2026-08-31
+  - Só soma DESPESA com status CONFIRMADA — RECEITA e transação CANCELADA
+    não entram. Transação sem categoria agrupa em "Sem categoria".
+  - Resposta: 200, lista ordenada por totalGasto decrescente (empate
+    desempatado por nome da categoria), cada item com:
+    {
+      "categoria": "Alimentação",
+      "totalGasto": 150.00,
+      "percentualDoTotal": 75.00,
+      "totalGastoPeriodoAnterior": null
+    }
+    totalGastoPeriodoAnterior compara com o período imediatamente anterior
+    de mesma duração em dias; vem null se a categoria não teve gasto nele.
+  - Respostas: 200 / 400 (inicio ou fim ausente, ou inicio depois do fim).
+  - Não depende do account-service (só lê o que já está no banco do
+    transaction-service).

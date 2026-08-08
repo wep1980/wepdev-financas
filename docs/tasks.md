@@ -11,12 +11,12 @@ Specs já existem: `docs/specs/account-service.yaml`,
 `docs/specs/transaction-service.yaml`. `account-service` tem **CRUD
 completo** (criar/listar/buscar/atualizar/excluir) + ajuste de saldo
 (débito/crédito) funcionando ponta a ponta, com teste. `transaction-service`
-tem **registrar**, **listar**, **cancelar** e **editar transação**
-funcionando ponta a ponta contra o `account-service` real, inclusive via
-`docker compose up` com autenticação de verdade (issuer do Keycloak
-corrigido) — 2026-08-07/08. CI já existe e está verde (só falta a
-ativação externa da `NVD_API_KEY`, ver seção de CI/CD). Falta o resto dos
-casos de uso de `transaction-service` (resumo por categoria/recorrentes).
+tem **registrar**, **listar**, **cancelar**, **editar transação** e
+**resumo por categoria** funcionando ponta a ponta contra o `account-service`
+real, inclusive via `docker compose up` com autenticação de verdade (issuer
+do Keycloak corrigido) — 2026-08-07/08. CI já existe (ver seção de CI/CD
+pro status atual da `NVD_API_KEY`). Falta só **transações recorrentes**
+no backlog de `transaction-service`.
 
 ### `account-service`
 
@@ -198,9 +198,24 @@ casos de uso de `transaction-service` (resumo por categoria/recorrentes).
       422. 9 testes unitários (`AtualizarTransacaoUseCaseTest`) + 7 de
       integração (`TransacaoResourceTest`), todos passando (47 no total do
       serviço, sem regressão no `account-service`).
-- [ ] Caso de uso: resumo por categoria (`GET /transacoes/resumo-por-categoria`)
-      — agregação usada pelo dashboard (fatia 6) e pela tool de IA (fatia 5);
-      implementar uma vez, os dois consumidores chamam o mesmo endpoint.
+- [x] Caso de uso: **resumo por categoria** (`ResumoPorCategoriaUseCase`,
+      `GET /transacoes/resumo-por-categoria?inicio&fim`) — agregação usada
+      pelo dashboard (fatia 6) e pela tool de IA (fatia 5); implementado uma
+      vez, os dois consumidores chamam o mesmo endpoint. Só soma `DESPESA`
+      `CONFIRMADA` (ignora `RECEITA` e transação `CANCELADA`); transação sem
+      categoria agrupa em "Sem categoria"; `percentualDoTotal` calculado
+      sobre o total gasto do período; `totalGastoPeriodoAnterior` compara com
+      o período imediatamente anterior de mesma duração (nulo se a categoria
+      não teve gasto nele); ordenado por `totalGasto` decrescente, empate
+      desempatado por nome da categoria (achado num teste: `HashMap` interno
+      do `groupingBy` não garante ordem determinística entre categorias com
+      total igual). 400 se `inicio`/`fim` ausente ou `inicio` depois de `fim`
+      (`IntervaloInvalidoException`, nova). 7 testes unitários
+      (`ResumoPorCategoriaUseCaseTest`) + 5 de integração
+      (`TransacaoResourceTest`), todos passando (59 no total do serviço).
+      Validado de ponta a ponta via containers reais: 150 de Alimentação +
+      50 de Transporte + 3000 de Receita (ignorada) → resumo retorna
+      Alimentação 75%, Transporte 25%.
 - [ ] Testes de integração com Testcontainers cobrindo o `account-service`
       real (Docker), não só o mock via `QuarkusMock` — útil pra pegar
       divergência de contrato entre os dois serviços que o mock não pegaria.
