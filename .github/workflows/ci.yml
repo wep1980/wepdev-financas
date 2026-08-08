@@ -39,6 +39,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.account-service == 'true'
     runs-on: ubuntu-latest
+    # Sobrescreve o "pull-requests: read" do topo do arquivo só nesse job —
+    # madrapps/jacoco-report precisa de write pra postar o comentário de
+    # cobertura na PR.
+    permissions:
+      contents: read
+      pull-requests: write
     defaults:
       run:
         working-directory: services/account-service
@@ -60,6 +66,15 @@ jobs:
           name: jacoco-report-account-service
           path: services/account-service/target/site/jacoco/
           retention-days: 14
+      # Só faz sentido comentar numa PR de verdade — em push direto pra
+      # main não tem PR pra comentar.
+      - name: Comentar cobertura na PR
+        if: github.event_name == 'pull_request'
+        uses: madrapps/jacoco-report@v1.8.0
+        with:
+          paths: services/account-service/target/site/jacoco/jacoco.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: Cobertura de teste — account-service
       # Só valida que a imagem continua buildando — publicar em registry e
       # fazer deploy fica pra fatia 9 (ADR-0020/0021, ver comentário no
       # topo do arquivo). -DskipTests porque os testes já rodaram acima.
@@ -83,6 +98,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.transaction-service == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     defaults:
       run:
         working-directory: services/transaction-service
@@ -102,6 +120,13 @@ jobs:
           name: jacoco-report-transaction-service
           path: services/transaction-service/target/site/jacoco/
           retention-days: 14
+      - name: Comentar cobertura na PR
+        if: github.event_name == 'pull_request'
+        uses: madrapps/jacoco-report@v1.8.0
+        with:
+          paths: services/transaction-service/target/site/jacoco/jacoco.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: Cobertura de teste — transaction-service
       - name: Build da imagem Docker (validação, não publica)
         run: |
           ./mvnw package -B -DskipTests

@@ -911,3 +911,30 @@ Criado/alterado: `services/account-service/pom.xml` e
 `services/transaction-service/pom.xml` (plugin JaCoCo + `argLine` no
 account-service); `.github/workflows/ci.yml` (passos de cobertura e
 build Docker nos dois jobs); `docs/tasks.md`.
+
+## 2026-08-08 — Comentário automático de cobertura na PR
+
+Pedido: usuário perguntou se existe interface gráfica pro JaCoCo.
+Expliquei que o próprio relatório HTML (já sendo gerado e publicado como
+artefato do CI) É a interface gráfica — árvore de pacotes/classes, %
+de cobertura, código-fonte com linha destacada por cobertura — só
+precisa baixar o artefato do run e abrir `index.html` local. Perguntei se
+o usuário queria alguma forma de ver isso sem baixar manualmente a cada
+run; ele topou um comentário automático de cobertura na Pull Request.
+
+Implementado: `madrapps/jacoco-report@v1.8.0` (confirmado via GitHub
+Releases da action) nos dois jobs do CI, lendo o `jacoco.xml` que o
+JaCoCo já gera junto com o HTML. Só roda em evento `pull_request`
+(`if: github.event_name == 'pull_request'`) — não faz sentido em push
+direto pra `main`, não existe PR pra comentar. Precisou adicionar
+`permissions: pull-requests: write` a nível de job nos dois jobs de
+serviço, sobrescrevendo o `pull-requests: read` do topo do arquivo (que
+segue valendo pro job `changes` e como default) — mesmo padrão já usado
+antes pro `dorny/paths-filter` funcionar em PR do Dependabot.
+
+Não validado contra uma PR real nesta sessão (não havia PR aberta) — só
+localmente, confiando no comportamento padrão e bem documentado do `if:`
+condicional do GitHub Actions. Validar na próxima PR real que rodar CI.
+
+Criado/alterado: `.github/workflows/ci.yml` (step novo + permissions
+por job nos dois jobs de serviço); `docs/tasks.md`.

@@ -318,7 +318,17 @@ Conforme `docs/specs/transaction-service.yaml` (endpoints
       63 em transaction-service, 30 em account-service). CI publica o
       relatório HTML como artefato do workflow run (`actions/upload-artifact`,
       14 dias de retenção) — sem Sonar/serviço externo por enquanto
-      (avaliado SonarCloud, usuário preferiu não configurar agora).
+      (avaliado SonarCloud, usuário preferiu não configurar agora). Além
+      disso, `madrapps/jacoco-report@v1.8.0` (confirmado via GitHub
+      Releases) posta um comentário com o resumo de cobertura direto na
+      PR, lendo o `jacoco.xml` gerado junto com o HTML — só roda em
+      `pull_request` (`if: github.event_name == 'pull_request'`, sem
+      sentido em push direto pra `main`, não tem PR pra comentar). Precisou
+      de `permissions: pull-requests: write` a nível de job (sobrescrevendo
+      o `read` do topo do arquivo só pros jobs `account-service` e
+      `transaction-service`) — ainda não validado contra uma PR real nesta
+      sessão, só localmente (a lógica do `if:` é padrão bem estabelecido do
+      GitHub Actions).
 - [x] **Build de imagem Docker no CI (validação)** — `mvn package -DskipTests`
       + `docker build -f src/main/docker/Dockerfile.jvm` a cada job, só pra
       garantir que a imagem continua buildando a cada mudança; não publica
