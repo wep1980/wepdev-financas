@@ -15,9 +15,27 @@ forma síncrona. Ao criar ou atualizar um cartão, o `card-service` chama
 (`PropagarAutorizacaoHeadersFactory`) — reusa o 404 do `account-service`
 como gate de autorização, mesmo padrão já usado pelo `transaction-service`.
 
-Quando a fatura for paga (próxima fatia deste serviço), o débito na
-`contaPagamentoId` também será síncrono, com token de serviço
-(`client_credentials`, role `service`).
+Ao pagar uma fatura (`POST /faturas/{id}/pagar`), o débito na
+`contaPagamentoId` também é síncrono — primeiro reconfirma posse com o
+token do usuário, depois debita com token de serviço
+(`client_credentials`, role `service`, `AccountServiceInternoClient`),
+mesmo padrão de dois tokens do `transaction-service`.
+
+## Fatura e parcelamento
+
+Não existe endpoint de criação manual de fatura — `LancarCompraUseCase`
+cria a `Fatura` automaticamente (uma por `cartaoId` + competência
+`AAAA-MM`) na primeira compra lançada naquela competência. Uma compra
+parcelada gera uma `Parcela` por competência consecutiva (não existe
+classe "Compra" persistida — é só o agrupamento lógico das `Parcela`s que
+compartilham o mesmo `compraId`). Arredondamento de
+`valorTotal / quantidadeParcelas` (2 casas, `HALF_UP`) absorve a
+diferença na última parcela.
+
+`FecharFaturasVencidasJob` (`quarkus-scheduler`, cron diário) fecha toda
+fatura `ABERTA` cuja `dataFechamento` já passou — núcleo testável
+(`FecharFaturasVencidasUseCase`) recebe a data como parâmetro, mesmo
+padrão do `GerarOcorrenciasRecorrentesJob` do `transaction-service`.
 
 ## Rodando no IntelliJ
 

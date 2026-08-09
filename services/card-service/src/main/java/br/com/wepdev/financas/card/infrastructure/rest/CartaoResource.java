@@ -6,11 +6,18 @@ import br.com.wepdev.financas.card.application.BuscarCartaoUseCase;
 import br.com.wepdev.financas.card.application.CriarCartaoCommand;
 import br.com.wepdev.financas.card.application.CriarCartaoUseCase;
 import br.com.wepdev.financas.card.application.ExcluirCartaoUseCase;
+import br.com.wepdev.financas.card.application.LancarCompraCommand;
+import br.com.wepdev.financas.card.application.LancarCompraUseCase;
 import br.com.wepdev.financas.card.application.ListarCartoesUseCase;
+import br.com.wepdev.financas.card.application.ListarFaturasUseCase;
 import br.com.wepdev.financas.card.domain.Cartao;
+import br.com.wepdev.financas.card.domain.StatusFatura;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.AtualizarCartaoRequest;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.CartaoResponse;
+import br.com.wepdev.financas.card.infrastructure.rest.dto.CompraResponse;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.CriarCartaoRequest;
+import br.com.wepdev.financas.card.infrastructure.rest.dto.FaturaResponse;
+import br.com.wepdev.financas.card.infrastructure.rest.dto.LancarCompraRequest;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.validation.Valid;
@@ -22,6 +29,7 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.jwt.JsonWebToken;
@@ -38,16 +46,21 @@ public class CartaoResource {
     private final BuscarCartaoUseCase buscarCartaoUseCase;
     private final AtualizarCartaoUseCase atualizarCartaoUseCase;
     private final ExcluirCartaoUseCase excluirCartaoUseCase;
+    private final LancarCompraUseCase lancarCompraUseCase;
+    private final ListarFaturasUseCase listarFaturasUseCase;
     private final SecurityIdentity identity;
 
     public CartaoResource(CriarCartaoUseCase criarCartaoUseCase, ListarCartoesUseCase listarCartoesUseCase,
                            BuscarCartaoUseCase buscarCartaoUseCase, AtualizarCartaoUseCase atualizarCartaoUseCase,
-                           ExcluirCartaoUseCase excluirCartaoUseCase, SecurityIdentity identity) {
+                           ExcluirCartaoUseCase excluirCartaoUseCase, LancarCompraUseCase lancarCompraUseCase,
+                           ListarFaturasUseCase listarFaturasUseCase, SecurityIdentity identity) {
         this.criarCartaoUseCase = criarCartaoUseCase;
         this.listarCartoesUseCase = listarCartoesUseCase;
         this.buscarCartaoUseCase = buscarCartaoUseCase;
         this.atualizarCartaoUseCase = atualizarCartaoUseCase;
         this.excluirCartaoUseCase = excluirCartaoUseCase;
+        this.lancarCompraUseCase = lancarCompraUseCase;
+        this.listarFaturasUseCase = listarFaturasUseCase;
         this.identity = identity;
     }
 
@@ -106,6 +119,31 @@ public class CartaoResource {
     public Response excluir(@PathParam("id") UUID id) {
         excluirCartaoUseCase.executar(id, usuarioIdAutenticado());
         return Response.noContent().build();
+    }
+
+    @POST
+    @Path("/{id}/compras")
+    @RolesAllowed("usuario")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response lancarCompra(@PathParam("id") UUID id, @Valid LancarCompraRequest request) {
+        var resultado = lancarCompraUseCase.executar(new LancarCompraCommand(
+                id, usuarioIdAutenticado(), request.descricao(), request.valorTotal(), request.categoria(),
+                request.dataCompra(), request.quantidadeParcelasOuUm()
+        ));
+        return Response.status(Response.Status.CREATED)
+                .entity(CompraResponse.de(resultado))
+                .build();
+    }
+
+    @GET
+    @Path("/{id}/faturas")
+    @RolesAllowed("usuario")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<FaturaResponse> listarFaturas(@PathParam("id") UUID id, @QueryParam("status") StatusFatura status) {
+        return listarFaturasUseCase.executar(id, usuarioIdAutenticado(), status).stream()
+                .map(FaturaResponse::de)
+                .toList();
     }
 
     /** sub do token OIDC = id do usuário no Keycloak — nunca aceitar usuarioId vindo do cliente (ADR-0003). */

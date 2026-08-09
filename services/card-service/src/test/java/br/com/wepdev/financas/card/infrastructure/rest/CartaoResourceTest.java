@@ -7,6 +7,7 @@ import br.com.wepdev.financas.card.domain.ContaNaoEncontradaException;
 import br.com.wepdev.financas.card.infrastructure.client.AccountServiceClientImpl;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.AtualizarCartaoRequest;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.CriarCartaoRequest;
+import br.com.wepdev.financas.card.infrastructure.rest.dto.LancarCompraRequest;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -44,6 +46,7 @@ class CartaoResourceTest {
     // não pode compartilhar usuário com testes que criam cartão pra
     // SUB_USUARIO_TESTE (sem rollback entre métodos na mesma classe).
     private static final String SUB_ISOLAMENTO = "c30c1000-0000-4000-8000-000000000003";
+    private static final String SUB_COMPRA = "c30c1000-0000-4000-8000-000000000004";
 
     @Inject
     CartaoRepository cartaoRepository;
@@ -245,6 +248,102 @@ class CartaoResourceTest {
         given()
         .when()
                 .delete("/api/v1/cartoes/{id}", UUID.randomUUID())
+        .then()
+                .statusCode(404);
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_COMPRA))
+    void deveriaLancarCompraAVista_eCriarFatura() {
+        String cartaoId = criarCartaoEObterId("Nubank compra");
+        LancarCompraRequest request = new LancarCompraRequest(
+                "Mercado", new BigDecimal("100.00"), "Alimentação", LocalDate.of(2026, 8, 1), 1
+        );
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .post("/api/v1/cartoes/{id}/compras", cartaoId)
+        .then()
+                .statusCode(201)
+                .body("quantidadeParcelas", equalTo(1))
+                .body("parcelas.size()", equalTo(1))
+                .body("parcelas[0].valor", equalTo(100.00f));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_COMPRA))
+    void deveriaLancarCompraParcelada_eDistribuirEmFaturasConsecutivas() {
+        String cartaoId = criarCartaoEObterId("Nubank parcelado");
+        LancarCompraRequest request = new LancarCompraRequest(
+                "Notebook", new BigDecimal("300.00"), "Eletrônicos", LocalDate.of(2026, 8, 1), 3
+        );
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .post("/api/v1/cartoes/{id}/compras", cartaoId)
+        .then()
+                .statusCode(201)
+                .body("parcelas.size()", equalTo(3))
+                .body("parcelas[0].numeroParcela", equalTo(1))
+                .body("parcelas[2].numeroParcela", equalTo(3));
+
+        given()
+        .when()
+                .get("/api/v1/cartoes/{id}/faturas", cartaoId)
+        .then()
+                .statusCode(200)
+                .body("size()", equalTo(3));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaRetornar404_quandoLancarCompraEmCartaoInexistente() {
+        LancarCompraRequest request = new LancarCompraRequest(
+                "Mercado", new BigDecimal("100.00"), "Alimentação", LocalDate.of(2026, 8, 1), 1
+        );
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .post("/api/v1/cartoes/{id}/compras", UUID.randomUUID())
+        .then()
+                .statusCode(404);
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaRetornar400_quandoLancarCompraSemDescricao() {
+        String cartaoId = criarCartaoEObterId("Nubank validação");
+        String jsonInvalido = """
+                {"valorTotal": 100.00, "dataCompra": "2026-08-01"}
+                """;
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(jsonInvalido)
+        .when()
+                .post("/api/v1/cartoes/{id}/compras", cartaoId)
+        .then()
+                .statusCode(400)
+                .body("erros[0].campo", equalTo("descricao"));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaRetornar404_quandoListarFaturasDeCartaoInexistente() {
+        given()
+        .when()
+                .get("/api/v1/cartoes/{id}/faturas", UUID.randomUUID())
         .then()
                 .statusCode(404);
     }

@@ -67,7 +67,7 @@ wepdev-financas/
 └── services/
     ├── account-service/        # Quarkus — contas financeiras (ver seção Endpoints abaixo)
     ├── transaction-service/    # Quarkus — transações, chama account-service síncrono
-    └── card-service/           # Quarkus — cartões, CRUD entregue; fatura/parcelamento em andamento
+    └── card-service/           # Quarkus — cartões, fatura e parcelamento
 ```
 
 ### Estado atual
@@ -91,14 +91,17 @@ gera a 1ª ocorrência na criação e as seguintes via job agendado
 Flyway, 91 testes, imagem Docker validada. Backlog do serviço completo
 (ver `docs/tasks.md`).
 
-**`card-service`** (fatia 2, em andamento) gerencia cartões de crédito,
+**`card-service`** gerencia cartões de crédito, fatura e parcelamento,
 independente de `TipoConta.CARTAO_CREDITO` do `account-service`
 ([ADR-0022](docs/architecture/adr/0022-card-service-independente-de-conta.md)):
 todo cartão tem um `contaPagamentoId` — referência lógica pra uma conta
 `CORRENTE`/`POUPANCA`/`CARTEIRA` que paga a fatura, confirmada de forma
-síncrona contra o `account-service`. CRUD completo (criar/listar/buscar/
-atualizar/excluir) entregue, 34 testes, imagem Docker validada. Fatura e
-parcelamento ainda não implementados (ver `docs/tasks.md`).
+síncrona contra o `account-service`. CRUD de cartão; lançar compra (à
+vista ou parcelada — parcelas distribuídas automaticamente em faturas
+consecutivas, criadas sob demanda, arredondamento absorvido na última
+parcela); listar/buscar fatura; pagar fatura (síncrono, idempotente);
+job agendado fecha fatura vencida automaticamente. 82 testes, imagem
+Docker validada. Backlog do serviço completo (ver `docs/tasks.md`).
 
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
 (privado). CI 100% verde — `mvn test` passa nos três serviços no runner
@@ -167,8 +170,7 @@ o próprio token do usuário repassado** — só então usa um token de serviço
 
 ## Endpoints principais (`card-service`, porta `8083`)
 
-Contrato completo em [`docs/specs/card-service.yaml`](docs/specs/card-service.yaml)
-— fatura e parcelamento ainda não implementados, só o CRUD de cartão.
+Contrato completo em [`docs/specs/card-service.yaml`](docs/specs/card-service.yaml).
 
 | Método | Path | Role (OIDC) | O que faz |
 |---|---|---|---|
@@ -177,6 +179,11 @@ Contrato completo em [`docs/specs/card-service.yaml`](docs/specs/card-service.ya
 | `GET` | `/api/v1/cartoes/{id}` | `usuario` | Busca cartão por id (404 se não existir ou não for seu) |
 | `PUT` | `/api/v1/cartoes/{id}` | `usuario` | Atualiza apelido/bandeira/limite/dias/contaPagamentoId (reconfirma posse) |
 | `DELETE` | `/api/v1/cartoes/{id}` | `usuario` | Exclui logicamente (inativa; idempotente; não afeta faturas/compras futuras) |
+| `POST` | `/api/v1/cartoes/{id}/compras` | `usuario` | Lança compra à vista ou parcelada — distribui as parcelas em faturas consecutivas, criando cada uma sob demanda; 404 se o cartão não for seu |
+| `GET` | `/api/v1/cartoes/{id}/faturas` | `usuario` | Lista faturas do cartão, mais recente primeiro — filtro opcional `status` (`ABERTA`\|`FECHADA`\|`PAGA`) |
+| `GET` | `/api/v1/faturas/{id}` | `usuario` | Busca fatura com as parcelas que a compõem; 404 se não for sua |
+| `POST` | `/api/v1/faturas/{id}/pagar` | `usuario` | Paga a fatura — débito síncrono na `contaPagamentoId` do cartão, idempotente; 422 se ainda `ABERTA` ou saldo insuficiente |
+| `GET` | `/api/v1/faturas/proximos-vencimentos` | `service` | [Interno] Faturas `FECHADA` com vencimento dentro da janela de dias informada (`dias` obrigatório) — consumido pelo futuro `notification-service` (ADR-0010) |
 
 `usuarioId` vem sempre do token, mesmo padrão dos outros dois serviços.
 Detalhe da chamada síncrona ao `account-service` em

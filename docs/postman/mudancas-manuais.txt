@@ -323,11 +323,79 @@ PUT /api/v1/cartoes/{id} — atualizar cartão
 DELETE /api/v1/cartoes/{id} — excluir cartão
   - Auth: OAuth 2.0, token de usuário (role "usuario")
   - Sem body. Exclusão lógica (ativo=false) — NÃO afeta faturas/compras já
-    existentes (quando esse domínio existir). Idempotente.
+    existentes. Idempotente.
   - Respostas: 204 / 404 (não existe ou não é seu).
 
-Ainda não implementado (fatura/parcelamento) — sem endpoint pra testar
-ainda: POST /cartoes/{id}/compras, GET /cartoes/{id}/faturas,
-GET /faturas/{id}, POST /faturas/{id}/pagar, GET /faturas/proximos-vencimentos.
-Ver docs/specs/card-service.yaml pro contrato completo (já espec'ado,
-código ainda não).
+
+------------------------------------------------------------
+2026-08-09 — card-service: fatura e parcelamento (endpoints novos)
+------------------------------------------------------------
+
+POST /api/v1/cartoes/{id}/compras — lançar compra (à vista ou parcelada)
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Header: Content-Type: application/json
+  - Body (raw JSON):
+    {
+      "descricao": "Notebook",
+      "valorTotal": 300.00,
+      "categoria": "Eletrônicos",
+      "dataCompra": "2026-08-05",
+      "quantidadeParcelas": 3
+    }
+    (descricao/valorTotal/dataCompra obrigatórios; categoria opcional;
+    quantidadeParcelas omitido = 1, à vista. valorTotal é o valor da
+    compra INTEIRA, não da parcela — o sistema divide.)
+  - NÃO existe endpoint de criar fatura manualmente — a fatura é criada
+    sozinha na 1ª compra lançada naquela competência (mês). Se dataCompra
+    for antes do diaFechamento do cartão, cai na fatura do mês da compra;
+    senão, na do mês seguinte. Parcelas seguintes caem em faturas dos
+    meses consecutivos, cada uma criada sob demanda.
+  - Arredondamento: valorTotal/quantidadeParcelas com 2 casas (a sobra do
+    arredondamento fica na ÚLTIMA parcela) — ex: 100.00 em 3x vira
+    33.33 + 33.33 + 33.34.
+  - Respostas: 201 (corpo com a compra e a lista de parcelas geradas,
+    cada uma com faturaId/competência) / 400 (campo obrigatório
+    ausente) / 404 (cartão não existe ou não é seu).
+  - Não chama o account-service aqui — só ao pagar a fatura.
+
+GET /api/v1/cartoes/{id}/faturas — listar faturas do cartão
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Query param opcional: status=ABERTA (ou FECHADA/PAGA)
+  - Resposta: 200, lista mais recente primeiro / 404 (cartão não é seu).
+
+GET /api/v1/faturas/{id} — buscar fatura com parcelas
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Respostas: 200 (inclui a lista de parcelas que compõem a fatura) /
+    404 (não existe ou não é sua).
+
+POST /api/v1/faturas/{id}/pagar — pagar fatura
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Só funciona em fatura FECHADA (uma fatura ABERTA não tem
+    valorTotal definitivo ainda — não há endpoint manual pra fechar, isso
+    acontece sozinho via job agendado no dia de fechamento do cartão).
+  - Debita valorTotal da contaPagamentoId do cartão, de forma síncrona
+    com o account-service — se o débito falhar (saldo insuficiente), a
+    fatura continua FECHADA, sem "pagamento fantasma".
+  - Idempotente: pagar de novo uma fatura já PAGA continua 204, sem
+    debitar de novo.
+  - Respostas: 204 / 404 (não existe ou não é sua) / 422 (ainda ABERTA,
+    ou saldo insuficiente na contaPagamentoId).
+  - Importante: o account-service precisa estar rodando também.
+
+GET /api/v1/faturas/proximos-vencimentos — [endpoint interno]
+  - Auth: OAuth 2.0, token de SERVIÇO (client_credentials, role "service")
+    — mesmo client usado pra testar /cartoes* no card-service, ver seção
+    1 deste arquivo e docs/postman/README.md.
+  - Sem body. Query param obrigatório: dias=7 (janela de antecedência)
+  - Resposta: 200, lista de faturas FECHADA (ainda não PAGA) com
+    vencimento dentro da janela, de TODOS os usuários — não filtra por
+    usuário porque é consumido pelo futuro notification-service
+    (ADR-0010). Inclui apelidoCartao pra facilitar a notificação.
+  - Não é pra testar com token de usuário normal — dá 403 de propósito.
+
+Job agendado: FecharFaturasVencidasJob roda sozinho (cron diário, não é
+um endpoint) e fecha toda fatura ABERTA cuja dataFechamento já passou —
+nada a testar manualmente no Postman aqui. Pra testar o pagamento sem
+esperar o cron, force o status da fatura pra FECHADA direto no banco
+(UPDATE faturas SET status='FECHADA' WHERE id='...') — é o que foi feito
+pra validar o fluxo de pagamento real nesta sessão.

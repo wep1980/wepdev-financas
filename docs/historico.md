@@ -1062,3 +1062,89 @@ URLs); `docs/postman/README.md` e `docs/postman/mudancas-manuais.txt`
 (card-service, primeira vez); `docs/postman/financas-dev.postman_environment.json`
 (`card_service_url`). Artifact de diagramas de classe republicado com a
 seção `Cartao`.
+
+## 2026-08-09 — Entre sessões: usuário está aprendendo com o projeto
+
+Antes de continuar o `card-service`, o usuário contou que está usando o
+`wepdev-financas` deliberadamente pra **aprender** as tecnologias
+envolvidas (Quarkus, Kafka, Keycloak/OIDC, etc.) — não domina boa parte
+delas ainda — e que a intenção de longo prazo, depois do sistema completo
+(back-end + web + mobile), é criar um **framework de criação de
+sistemas** baseado no aprendizado daqui. Perguntei o quanto de explicação
+ele queria daqui pra frente ao introduzir algo novo; escolheu "breve por
+padrão, aprofundo se ele perguntar". Registrado em memória
+(`user_aprendizado_tecnologias.md` e `project_framework_pos_sistema_completo.md`)
+pra sessões futuras — não é uma tarefa deste projeto, é contexto de como
+colaborar.
+
+## 2026-08-09 — `card-service`: fatura e parcelamento (fecha a fatia 2)
+
+Pedido: "vamos continuar com fatura e parcelamento do card-service".
+Segui a ordem já planejada em `docs/tasks.md`: domínio → persistência →
+lançar compra/listar/buscar fatura → testes → pagar fatura → job de
+fechamento + próximos vencimentos → validação real → documentação — um
+item de cada vez, mesmo padrão de `transaction-service`.
+
+Domínio: `Fatura` (nasce `ABERTA` com `valorTotal=0`, `adicionarParcela()`
+acumula, `fechar()`/`pagar()` idempotentes) e `Parcela` (imutável, sem
+classe "Compra" persistida — uma compra é só o agrupamento lógico de
+`Parcela`s com o mesmo `compraId`). `LancarCompraUseCase`: decide a
+competência da 1ª parcela comparando o dia da compra com o dia de
+fechamento do cartão (antes → mês corrente, senão → mês seguinte),
+cria cada `Fatura` sob demanda (uma por `cartaoId`+competência, sem
+endpoint de criação manual), divide `valorTotal` pelas parcelas
+(`HALF_UP`, 2 casas) absorvendo a sobra do arredondamento na última —
+validado com teste e com curl real: 100.00 em 3x virou
+33.33+33.33+33.34, soma batendo exatamente.
+
+`PagarFaturaUseCase`: só paga fatura `FECHADA` (422 se `ABERTA`), debita
+a `contaPagamentoId` do cartão **antes** de marcar `PAGA` (se falhar, a
+fatura continua `FECHADA`, sem "pagamento fantasma"), idempotente.
+Precisou adicionar `debitar()` na porta `AccountServiceClient` do
+`card-service` — copiei o `AccountServiceInternoClient` (token de
+serviço via `quarkus-rest-client-oidc-filter`) quase igual ao do
+`transaction-service`.
+
+`FecharFaturasVencidasJob` (`quarkus-scheduler`, cron diário) fecha
+fatura `ABERTA` vencida automaticamente — mesmo padrão de núcleo
+testável + wrapper fino já usado no `GerarOcorrenciasRecorrentesJob` do
+`transaction-service` (recebe "hoje" como parâmetro). `GET
+/faturas/proximos-vencimentos` (role `service`) só considera `FECHADA`
+(nem `ABERTA`, que não tem valor definitivo, nem `PAGA`, que já não é
+mais pendente).
+
+82 testes no total do serviço (16 novos de domínio, 26 novos de caso de
+uso, 16 novos de integração REST), todos passando de primeira — nenhum
+bug de isolamento entre testes dessa vez (lição das duas ocorrências
+anteriores já virou hábito: sub exclusivo sempre que o teste faz
+asserção de tamanho de lista). Validado de ponta a ponta contra
+containers reais, incluindo o caminho que os testes mockam: paguei uma
+fatura de verdade e confirmei o saldo da conta de pagamento no
+`account-service` caindo exatamente o valor esperado (5000.00 →
+4866.67), idempotência confirmada numa segunda chamada, e o endpoint de
+próximos vencimentos retornando o `apelidoCartao` corretamente pro
+service-account real. Como não existe endpoint pra fechar fatura
+manualmente (fica só pro job), fechei uma fatura direto no banco via SQL
+pra poder testar o pagamento sem esperar o cron — documentado no
+changelog do Postman como o jeito de testar isso manualmente.
+
+Isso fecha a fatia 2 do roadmap (`card-service`) por completo. Próxima
+fatia é `document-service` (fatia 3) — ainda sem contrato OpenAPI.
+
+Criado: domínio (`Fatura`, `Parcela`, `StatusFatura`,
+`FaturaNaoEncontradaException`, `FaturaAindaAbertaException`,
+`SaldoInsuficienteException`, `FaturaRepository`, `ParcelaRepository`);
+persistência (migração V2, entities/mappers/repositories);
+aplicação (`LancarCompraUseCase`, `ListarFaturasUseCase`,
+`BuscarFaturaUseCase`, `PagarFaturaUseCase`,
+`FecharFaturasVencidasUseCase`, `ProximosVencimentosUseCase`); REST
+(`FaturaResource` novo, `CartaoResource` ganhou `/compras` e `/faturas`,
+DTOs, exception mappers); scheduler (`FecharFaturasVencidasJob`);
+`AccountServiceInternoClient` + `debitar()` na porta. Alterado:
+`docs/specs/card-service.yaml` não precisou mudar (implementação seguiu
+o contrato já escrito à risca); `docs/architecture/diagrams.md` (seção
+4.4 revisada + 4.5 nova, seção 3.3 atualizada); `docs/architecture/overview.md`;
+`docs/roadmap.md`; `docs/tasks.md` (reescrito, fatia 2 comprimida como
+concluída, fatia 3 como próxima); `README.md` (raiz e do serviço);
+`docs/postman/mudancas-manuais.txt`; artifact de diagramas de classe
+republicado.

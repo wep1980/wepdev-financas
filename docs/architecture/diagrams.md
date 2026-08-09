@@ -43,7 +43,7 @@ graph LR
     subgraph "Sistema de Finanças Pessoais"
         AccountSvc["account-service :8081"]
         TxSvc["transaction-service :8082"]
-        CardSvc["card-service :8083 (CRUD de cartão)"]
+        CardSvc["card-service :8083"]
         DocSvc["document-service :8084 (planejado)"]
         BudgetSvc["budget-service :8085 (planejado)"]
         AiSvc["ai-service :8086 (planejado)"]
@@ -203,10 +203,10 @@ erDiagram
     }
 ```
 
-Contrato completo em `docs/specs/card-service.yaml`. `Cartao` já tem
-diagrama de classe (seção 4.4) — `Fatura`/`Parcela` ainda não foram
-implementados (ver `docs/tasks.md`), este ER conceitual segue sendo o
-mapa deles até lá.
+Contrato completo em `docs/specs/card-service.yaml`. `Cartao`, `Fatura` e
+`Parcela` já têm diagrama de classe (seções 4.4 e 4.5, código
+implementado) — este ER conceitual segue sendo o mapa rápido de alto
+nível, sem repetir o detalhe de método já coberto lá.
 
 ### 3.4 Pendente
 
@@ -504,6 +504,7 @@ classDiagram
     class AccountServiceClient {
         <<port>>
         +confirmarPosseDaConta(contaId) void
+        +debitar(contaId, valor) void
     }
 
     class ContaNaoEncontradaException {
@@ -516,28 +517,105 @@ classDiagram
         +CartaoNaoEncontradoException(id)
     }
 
+    class SaldoInsuficienteException {
+        <<exception>>
+        +SaldoInsuficienteException(contaId)
+    }
+
     Cartao "1" *-- "0..1" Bandeira : bandeira
     AccountServiceClient ..> ContaNaoEncontradaException : lança
+    AccountServiceClient ..> SaldoInsuficienteException : lança em debitar()
 
     note for Cartao "contaPagamentoId é referência LÓGICA a uma Conta\ndo account-service (CORRENTE/POUPANCA/CARTEIRA,\nnunca CARTAO_CREDITO — evita circularidade), não\numa FK real (database-per-service, ADR-0001). Nunca\né uma TipoConta.CARTAO_CREDITO — card-service é\nindependente desse tipo (ADR-0022)."
-    note for AccountServiceClient "Porta pro account-service (chamada síncrona).\nconfirmarPosseDaConta() usa o token do PRÓPRIO\nusuário repassado (PropagarAutorizacaoHeadersFactory)\ncontra GET /contas/{id} — reusa o 404 do\naccount-service, evita IDOR. Chamado ao criar E ao\natualizar um cartão (contaPagamentoId pode mudar)."
+    note for AccountServiceClient "Porta pro account-service (chamada síncrona).\nconfirmarPosseDaConta() usa o token do PRÓPRIO\nusuário repassado (PropagarAutorizacaoHeadersFactory)\ncontra GET /contas/{id} — reusa o 404 do\naccount-service, evita IDOR. debitar() (usado só ao\npagar fatura) confirma posse de novo e então debita\ncom token de serviço (client_credentials)."
     note for CartaoNaoEncontradoException "Mesmo padrão anti-IDOR dos outros dois serviços:\nid inexistente OU de outro usuário viram o\nmesmo 404."
 ```
 
 Regras que esse diagrama expressa:
 
-- **Fatura e Compra/Parcela ainda não existem no código** — só `Cartao`
-  (CRUD) foi implementado até aqui. O modelo conceitual completo (seção
-  3.3) já inclui `Fatura` e `Parcela`, que entram nesta seção quando
-  implementados (não antecipar o diagrama de classe do que ainda não
-  existe, CLAUDE.md — diagrama acompanha código, não o contrário).
 - **`contaPagamentoId` é confirmado, nunca uma FK real.** `CriarCartaoUseCase`
   e `AtualizarCartaoUseCase` chamam `AccountServiceClient.confirmarPosseDaConta()`
   antes de persistir — sem cartão "órfão" de conta inválida ou de outro
   usuário.
 - **Exclusão é sempre lógica.** `inativar()` marca `ativo=false`,
-  idempotente; não afeta faturas/compras já existentes (quando esse
-  domínio existir).
+  idempotente; não afeta faturas/compras já existentes.
+
+### 4.5 `card-service` — `Fatura` e `Parcela`
+
+```mermaid
+classDiagram
+    class Fatura {
+        -UUID id
+        -UUID cartaoId
+        -UUID usuarioId
+        -YearMonth competencia
+        -LocalDate dataFechamento
+        -LocalDate dataVencimento
+        -BigDecimal valorTotal
+        -StatusFatura status
+        +criar(cartaoId, usuarioId, competencia, dataFechamento, dataVencimento)$ Fatura
+        +reconstituir(id, cartaoId, ...)$ Fatura
+        +adicionarParcela(valor) void
+        +fechar() void
+        +pagar() void
+        +isAberta() boolean
+        +isPaga() boolean
+    }
+
+    class Parcela {
+        -UUID id
+        -UUID faturaId
+        -UUID compraId
+        -String descricao
+        -BigDecimal valor
+        -String categoria
+        -int numeroParcela
+        -int quantidadeParcelas
+        +criar(faturaId, compraId, descricao, valor, categoria, numeroParcela, quantidadeParcelas)$ Parcela
+        +reconstituir(id, faturaId, ...)$ Parcela
+    }
+
+    class StatusFatura {
+        <<enumeration>>
+        ABERTA
+        FECHADA
+        PAGA
+    }
+
+    class FaturaNaoEncontradaException {
+        <<exception>>
+        +FaturaNaoEncontradaException(id)
+    }
+
+    class FaturaAindaAbertaException {
+        <<exception>>
+        +FaturaAindaAbertaException(id)
+    }
+
+    Fatura "1" *-- "1" StatusFatura : status
+    Fatura "1" o-- "0..*" Parcela : contém (faturaId)
+
+    note for Parcela "Não existe classe \"Compra\" persistida — uma compra\né só o agrupamento lógico de todas as Parcelas que\ncompartilham o mesmo compraId (LancarCompraUseCase).\nUma compra parcelada gera 1 Parcela por Fatura\n(competências consecutivas)."
+    note for Fatura "Nasce ABERTA e com valorTotal=0 — cada Parcela\nlançada incrementa o valorTotal via adicionarParcela().\nUma fatura por (cartaoId, competencia); criada\nautomaticamente por LancarCompraUseCase, sem endpoint\nde criação manual. fechar()/pagar() são idempotentes."
+    note for FaturaAindaAbertaException "Lançada por PagarFaturaUseCase quando a fatura\nainda não fechou (sem valorTotal definitivo) —\nmapeada pra 422."
+```
+
+Regras que esse diagrama expressa:
+
+- **Fechamento automático, não manual.** `FecharFaturasVencidasJob`
+  (`quarkus-scheduler`, cron diário) fecha toda fatura `ABERTA` cuja
+  `dataFechamento` já passou — mesmo padrão de núcleo testável +
+  wrapper fino já usado em `transaction-service`
+  (`GerarOcorrenciasRecorrentesJob`): a lógica testável
+  (`FecharFaturasVencidasUseCase`) recebe "hoje" como parâmetro.
+- **Pagar é síncrono e idempotente.** `PagarFaturaUseCase` debita
+  `valorTotal` da `contaPagamentoId` do cartão **antes** de marcar
+  `PAGA` — se o débito falhar (`SaldoInsuficienteException`), a fatura
+  continua `FECHADA`, sem "pagamento fantasma". Pagar de novo uma fatura
+  já `PAGA` é 204 sem debitar de novo.
+- **`GET /faturas/proximos-vencimentos` (role `service`) só considera
+  `FECHADA`** — uma fatura `PAGA` não é mais um vencimento pendente,
+  `ABERTA` ainda não tem valor definitivo pra alertar o usuário.
 
 ## 5. Implantação (produção)
 

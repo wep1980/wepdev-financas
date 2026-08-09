@@ -1,5 +1,6 @@
 package br.com.wepdev.financas.card.domain;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
@@ -11,4 +12,7 @@ import java.util.UUID;
 public interface AccountServiceClient {
 
     void confirmarPosseDaConta(UUID contaId);
+
+    /** Chamado só ao pagar fatura (POST /faturas/{id}/pagar) — confirma posse de novo antes de debitar. */
+    void debitar(UUID contaId, BigDecimal valor);
 }
