@@ -31,6 +31,16 @@
       "bearerOnly": false
     },
     {
+      "clientId": "card-service",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "changeit",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "bearerOnly": false
+    },
+    {
       "clientId": "web-app",
       "enabled": true,
       "publicClient": true,
@@ -63,6 +73,12 @@
       "username": "service-account-transaction-service",
       "enabled": true,
       "serviceAccountClientId": "transaction-service",
+      "realmRoles": ["service"]
+    },
+    {
+      "username": "service-account-card-service",
+      "enabled": true,
+      "serviceAccountClientId": "card-service",
       "realmRoles": ["service"]
     }
   ]

@@ -998,3 +998,67 @@ Criado/alterado: `docs/architecture/adr/0022-card-service-independente-de-conta.
 (novo); `docs/specs/card-service.yaml` (novo); `docs/tasks.md` (reescrito);
 `docs/roadmap.md`; `docs/architecture/overview.md`;
 `docs/architecture/diagrams.md`.
+
+## 2026-08-09 — `card-service`: scaffold + CRUD de cartão
+
+Continuação direta da sessão anterior (mesmo pedido "vamos pro próximo
+passo do roadmap") — depois da spec/ADR prontas, implementei a primeira
+fatia vertical do `card-service`, mesmo padrão usado em
+`transaction-service` (scaffold → domínio → casos de uso → REST → testes
+→ validação real → documentação, um item de cada vez).
+
+Scaffold: projeto Quarkus novo copiando a estrutura do
+`transaction-service` (mvnw, Dockerfiles, `.mvn/wrapper`, plugins JaCoCo/
+dependency-check já configurados desde o início, aprendendo com o que já
+foi corrigido nos outros dois serviços). Banco `card_db` — precisou criar
+manualmente no container MySQL já rodando (`docker exec ... CREATE
+DATABASE`), porque o script `infra/mysql/init/01-databases.sql` só roda
+na primeira subida do volume (mesmo motivo que já tinha exigido tratamento
+manual no Keycloak antes). Client `card-service` no Keycloak também
+criado direto no realm já rodando via `kcadm.sh` (`docker exec` com
+`MSYS_NO_PATHCONV=1` — sem isso o git-bash do Windows reescreve o path do
+binário dentro do container e quebra o `docker exec`), com o
+service-account recebendo a role `service` — confirmado gerando um token
+client_credentials de verdade e decodificando o JWT.
+
+Domínio: `Cartao` (apelido, bandeira opcional, limite, diaFechamento/
+diaVencimento, contaPagamentoId, ativo) + `AccountServiceClient`
+(`confirmarPosseDaConta`) — copiei quase literalmente o client HTTP do
+`transaction-service` (`AccountServiceUsuarioClient` +
+`PropagarAutorizacaoHeadersFactory`), já que a lógica "confirma posse via
+GET /contas/{id} com o token do próprio usuário repassado" é idêntica.
+Casos de uso criar/listar/buscar/atualizar/excluir, todos seguindo o
+padrão anti-IDOR já estabelecido (404 pra id inexistente OU de outro
+usuário). `AtualizarCartaoUseCase` reconfirma a posse de
+`contaPagamentoId` a cada atualização, já que o campo pode mudar pra uma
+conta que não é mais do usuário.
+
+Bug de teste achado e corrigido (mesma classe de erro que já apareceu
+duas vezes antes nesta sessão, com `resumo por categoria` e `transações
+recorrentes`): teste de isolamento reusando um `sub` que outros métodos da
+mesma classe já tinham usado pra criar cartão, quebrando a asserção
+"size() == 0" — corrigido com um `sub` exclusivo (`SUB_ISOLAMENTO`), mesmo
+padrão já formalizado nas outras duas ocorrências.
+
+7 testes de domínio + testes de caso de uso pra cada operação + 12 de
+integração REST — 34 testes no total do serviço, todos passando. Validado
+de ponta a ponta contra containers reais: criar conta de pagamento →
+criar cartão → listar → buscar → atualizar (trocando `contaPagamentoId`)
+→ excluir (idempotente, cartão inativo some da listagem mas continua
+buscável por id) → criar cartão com `contaPagamentoId` inexistente dá
+404. CI ganhou o job `card-service`, mesmo template dos outros dois
+(testes + cobertura JaCoCo + build de imagem Docker de validação +
+dependency-check) — já nasce com tudo isso configurado, sem precisar
+descobrir de novo o que já foi aprendido nos outros serviços.
+
+Criado: `services/card-service/` inteiro (scaffold + `Cartao` + CRUD +
+testes + README). Alterado: `docker-compose.yml` (serviço `card-service`);
+`.env.example` (`CARD_SERVICE_CLIENT_SECRET`); `infra/keycloak/realm-financas.json`
+(client + service-account `card-service`); `infra/mysql/init/01-databases.sql`
+(`card_db`); `.github/workflows/ci.yml` (job `card-service`);
+`docs/architecture/diagrams.md` (seção 4.4 — diagrama de classe de
+`Cartao`); `docs/tasks.md`; `README.md` (raiz — estado atual, endpoints,
+URLs); `docs/postman/README.md` e `docs/postman/mudancas-manuais.txt`
+(card-service, primeira vez); `docs/postman/financas-dev.postman_environment.json`
+(`card_service_url`). Artifact de diagramas de classe republicado com a
+seção `Cartao`.

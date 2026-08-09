@@ -43,7 +43,7 @@ graph LR
     subgraph "Sistema de Finanças Pessoais"
         AccountSvc["account-service :8081"]
         TxSvc["transaction-service :8082"]
-        CardSvc["card-service :8083 (spec pronta)"]
+        CardSvc["card-service :8083 (CRUD de cartão)"]
         DocSvc["document-service :8084 (planejado)"]
         BudgetSvc["budget-service :8085 (planejado)"]
         AiSvc["ai-service :8086 (planejado)"]
@@ -203,9 +203,10 @@ erDiagram
     }
 ```
 
-Contrato completo em `docs/specs/card-service.yaml` — código ainda não
-iniciado (ver `docs/tasks.md`), este diagrama é o mapa conceitual, vira
-diagrama de classe (seção 4) quando o domínio for implementado.
+Contrato completo em `docs/specs/card-service.yaml`. `Cartao` já tem
+diagrama de classe (seção 4.4) — `Fatura`/`Parcela` ainda não foram
+implementados (ver `docs/tasks.md`), este ER conceitual segue sendo o
+mapa deles até lá.
 
 ### 3.4 Pendente
 
@@ -468,6 +469,75 @@ Regras que esse diagrama expressa:
   novas `Transacao`s de serem criadas pela regra — as que já existem
   continuam normalmente (têm vida própria, editáveis/canceláveis via
   `/transacoes/{id}` como qualquer outra).
+
+### 4.4 `card-service` — `Cartao`
+
+```mermaid
+classDiagram
+    class Cartao {
+        -UUID id
+        -UUID usuarioId
+        -String apelido
+        -Bandeira bandeira
+        -BigDecimal limite
+        -int diaFechamento
+        -int diaVencimento
+        -UUID contaPagamentoId
+        -boolean ativo
+        -Instant criadoEm
+        +criar(usuarioId, apelido, bandeira, limite, diaFechamento, diaVencimento, contaPagamentoId)$ Cartao
+        +reconstituir(id, usuarioId, ...)$ Cartao
+        +atualizar(apelido, bandeira, limite, diaFechamento, diaVencimento, contaPagamentoId) void
+        +inativar() void
+        +isAtivo() boolean
+    }
+
+    class Bandeira {
+        <<enumeration>>
+        VISA
+        MASTERCARD
+        ELO
+        AMEX
+        OUTRA
+    }
+
+    class AccountServiceClient {
+        <<port>>
+        +confirmarPosseDaConta(contaId) void
+    }
+
+    class ContaNaoEncontradaException {
+        <<exception>>
+        +ContaNaoEncontradaException(contaId)
+    }
+
+    class CartaoNaoEncontradoException {
+        <<exception>>
+        +CartaoNaoEncontradoException(id)
+    }
+
+    Cartao "1" *-- "0..1" Bandeira : bandeira
+    AccountServiceClient ..> ContaNaoEncontradaException : lança
+
+    note for Cartao "contaPagamentoId é referência LÓGICA a uma Conta\ndo account-service (CORRENTE/POUPANCA/CARTEIRA,\nnunca CARTAO_CREDITO — evita circularidade), não\numa FK real (database-per-service, ADR-0001). Nunca\né uma TipoConta.CARTAO_CREDITO — card-service é\nindependente desse tipo (ADR-0022)."
+    note for AccountServiceClient "Porta pro account-service (chamada síncrona).\nconfirmarPosseDaConta() usa o token do PRÓPRIO\nusuário repassado (PropagarAutorizacaoHeadersFactory)\ncontra GET /contas/{id} — reusa o 404 do\naccount-service, evita IDOR. Chamado ao criar E ao\natualizar um cartão (contaPagamentoId pode mudar)."
+    note for CartaoNaoEncontradoException "Mesmo padrão anti-IDOR dos outros dois serviços:\nid inexistente OU de outro usuário viram o\nmesmo 404."
+```
+
+Regras que esse diagrama expressa:
+
+- **Fatura e Compra/Parcela ainda não existem no código** — só `Cartao`
+  (CRUD) foi implementado até aqui. O modelo conceitual completo (seção
+  3.3) já inclui `Fatura` e `Parcela`, que entram nesta seção quando
+  implementados (não antecipar o diagrama de classe do que ainda não
+  existe, CLAUDE.md — diagrama acompanha código, não o contrário).
+- **`contaPagamentoId` é confirmado, nunca uma FK real.** `CriarCartaoUseCase`
+  e `AtualizarCartaoUseCase` chamam `AccountServiceClient.confirmarPosseDaConta()`
+  antes de persistir — sem cartão "órfão" de conta inválida ou de outro
+  usuário.
+- **Exclusão é sempre lógica.** `inativar()` marca `ativo=false`,
+  idempotente; não afeta faturas/compras já existentes (quando esse
+  domínio existir).
 
 ## 5. Implantação (produção)
 

@@ -24,6 +24,7 @@ jobs:
     outputs:
       account-service: ${{ steps.filter.outputs.account-service }}
       transaction-service: ${{ steps.filter.outputs.transaction-service }}
+      card-service: ${{ steps.filter.outputs.card-service }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -34,6 +35,8 @@ jobs:
               - 'services/account-service/**'
             transaction-service:
               - 'services/transaction-service/**'
+            card-service:
+              - 'services/card-service/**'
 
   account-service:
     needs: changes
@@ -85,6 +88,52 @@ jobs:
       # Precisa de NVD_API_KEY (secret do repo) — sem ela o NVD rejeita a
       # sincronização com "Invalid API Key" (validado localmente,
       # 2026-08-07). Gerar de graça em https://nvd.nist.gov/developers/request-an-api-key.
+      - name: Cache da base de dados do OWASP Dependency-Check
+        uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: dependency-check-data-${{ github.run_id }}
+          restore-keys: dependency-check-data-
+      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
+        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+
+  card-service:
+    needs: changes
+    if: needs.changes.outputs.card-service == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: services/card-service
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: services/card-service/pom.xml
+      - name: Testes (unitário + integração)
+        run: ./mvnw test -B
+      - name: Publicar relatório de cobertura (JaCoCo)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report-card-service
+          path: services/card-service/target/site/jacoco/
+          retention-days: 14
+      - name: Comentar cobertura na PR
+        if: github.event_name == 'pull_request'
+        uses: madrapps/jacoco-report@v1.8.0
+        with:
+          paths: services/card-service/target/site/jacoco/jacoco.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: Cobertura de teste — card-service
+      - name: Build da imagem Docker (validação, não publica)
+        run: |
+          ./mvnw package -B -DskipTests
+          docker build -f src/main/docker/Dockerfile.jvm -t card-service:ci .
       - name: Cache da base de dados do OWASP Dependency-Check
         uses: actions/cache@v6
         with:

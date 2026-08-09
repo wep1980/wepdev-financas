@@ -66,7 +66,8 @@ wepdev-financas/
 ├── infra/keycloak/             # realm pré-configurado (roles, clients, usuário de teste)
 └── services/
     ├── account-service/        # Quarkus — contas financeiras (ver seção Endpoints abaixo)
-    └── transaction-service/    # Quarkus — transações, chama account-service síncrono
+    ├── transaction-service/    # Quarkus — transações, chama account-service síncrono
+    └── card-service/           # Quarkus — cartões, CRUD entregue; fatura/parcelamento em andamento
 ```
 
 ### Estado atual
@@ -90,8 +91,17 @@ gera a 1ª ocorrência na criação e as seguintes via job agendado
 Flyway, 91 testes, imagem Docker validada. Backlog do serviço completo
 (ver `docs/tasks.md`).
 
+**`card-service`** (fatia 2, em andamento) gerencia cartões de crédito,
+independente de `TipoConta.CARTAO_CREDITO` do `account-service`
+([ADR-0022](docs/architecture/adr/0022-card-service-independente-de-conta.md)):
+todo cartão tem um `contaPagamentoId` — referência lógica pra uma conta
+`CORRENTE`/`POUPANCA`/`CARTEIRA` que paga a fatura, confirmada de forma
+síncrona contra o `account-service`. CRUD completo (criar/listar/buscar/
+atualizar/excluir) entregue, 34 testes, imagem Docker validada. Fatura e
+parcelamento ainda não implementados (ver `docs/tasks.md`).
+
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
-(privado). CI 100% verde — `mvn test` passa nos dois serviços no runner
+(privado). CI 100% verde — `mvn test` passa nos três serviços no runner
 hospedado, cobertura publicada como artefato do run (JaCoCo), a imagem
 Docker é validada a cada mudança (`docker build`, sem publicar em
 registry) e o scan de vulnerabilidade (OWASP Dependency-Check, ADR-0017)
@@ -99,13 +109,13 @@ também passa, com a `NVD_API_KEY` ativa (ver
 [`docs/architecture/security.md`](docs/architecture/security.md)). Ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 
-`docker compose up -d --build account-service transaction-service` sobe os
-dois serviços + toda a infra (MySQL, Redis, MongoDB, Keycloak, Kafka,
-Prometheus, Grafana) do zero, com autenticação de verdade funcionando —
-validado ponta a ponta (criar conta → registrar transação → saldo
-atualizado, via containers). Pra desenvolvimento do dia a dia, mais rápido
-rodar só a infra via compose e os serviços em `mvn quarkus:dev` local (ver
-README de cada serviço).
+`docker compose up -d --build account-service transaction-service
+card-service` sobe os três serviços + toda a infra (MySQL, Redis,
+MongoDB, Keycloak, Kafka, Prometheus, Grafana) do zero, com autenticação
+de verdade funcionando — validado ponta a ponta (criar conta → registrar
+transação/criar cartão → saldo atualizado, via containers). Pra
+desenvolvimento do dia a dia, mais rápido rodar só a infra via compose e
+os serviços em `mvn quarkus:dev` local (ver README de cada serviço).
 
 ## Endpoints principais (`account-service`, porta `8081`)
 
@@ -155,6 +165,23 @@ o próprio token do usuário repassado** — só então usa um token de serviço
 (client credentials) pra aplicar o ajuste no endpoint interno. Detalhe em
 [`services/transaction-service/README.md`](services/transaction-service/README.md).
 
+## Endpoints principais (`card-service`, porta `8083`)
+
+Contrato completo em [`docs/specs/card-service.yaml`](docs/specs/card-service.yaml)
+— fatura e parcelamento ainda não implementados, só o CRUD de cartão.
+
+| Método | Path | Role (OIDC) | O que faz |
+|---|---|---|---|
+| `POST` | `/api/v1/cartoes` | `usuario` | Cria cartão — confirma `contaPagamentoId` contra o `account-service`; 404 se não existir/não for sua |
+| `GET` | `/api/v1/cartoes` | `usuario` | Lista cartões ativos do usuário autenticado |
+| `GET` | `/api/v1/cartoes/{id}` | `usuario` | Busca cartão por id (404 se não existir ou não for seu) |
+| `PUT` | `/api/v1/cartoes/{id}` | `usuario` | Atualiza apelido/bandeira/limite/dias/contaPagamentoId (reconfirma posse) |
+| `DELETE` | `/api/v1/cartoes/{id}` | `usuario` | Exclui logicamente (inativa; idempotente; não afeta faturas/compras futuras) |
+
+`usuarioId` vem sempre do token, mesmo padrão dos outros dois serviços.
+Detalhe da chamada síncrona ao `account-service` em
+[`services/card-service/README.md`](services/card-service/README.md).
+
 ## URLs úteis (ambiente de dev local)
 
 Depois de `docker compose up -d` (infra) + `mvn quarkus:dev` em cada
@@ -171,12 +198,14 @@ padrão pra produção, ainda não implantado) em
 | `account-service` — health | `http://localhost:8081/q/health` | — |
 | `transaction-service` (REST) | `http://localhost:8082` | token OIDC, ver abaixo |
 | `transaction-service` — Swagger UI | `http://localhost:8082/q/swagger-ui` | — |
+| `card-service` (REST) | `http://localhost:8083` | token OIDC, ver abaixo |
+| `card-service` — Swagger UI | `http://localhost:8083/q/swagger-ui` | — |
 | Keycloak (admin console) | `http://localhost:8080` | `admin` / `admin` |
 | Keycloak (token, realm `financas`) | `http://localhost:8080/realms/financas/protocol/openid-connect/token` | ver `infra/keycloak/realm-financas.json` |
 | Grafana | `http://localhost:3001` | `admin` / `admin` |
 | Kafka UI ([kafka-ui](https://github.com/provectus/kafka-ui) — tópicos, mensagens, config) | `http://localhost:8090` | — |
 | Prometheus | `http://localhost:9090` | — |
-| MySQL (`account_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
+| MySQL (`account_db`/`transaction_db`/`card_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
 | Kafka (broker, ex: DBeaver/cliente Kafka) | `localhost:29092` | — |
 
 Todas as credenciais acima são só de dev, nunca as mesmas em produção (ver

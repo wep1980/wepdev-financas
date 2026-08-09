@@ -21,20 +21,24 @@ cd services/account-service && mvn quarkus:dev
 
 # transaction-service (em outro terminal — depende do account-service pra registrar transação)
 cd services/transaction-service && mvn quarkus:dev
+
+# card-service (em outro terminal — depende do account-service pra confirmar contaPagamentoId)
+cd services/card-service && mvn quarkus:dev
 ```
 
-Confirme que os três estão respondendo antes de seguir:
+Confirme que todos estão respondendo antes de seguir:
 
 ```bash
 curl http://localhost:8080/realms/financas/.well-known/openid-configuration   # Keycloak
 curl http://localhost:8081/q/health                                          # account-service
 curl http://localhost:8082/q/health                                          # transaction-service
+curl http://localhost:8083/q/health                                          # card-service
 ```
 
-Alternativa: `docker compose up -d --build account-service transaction-service`
-sobe tudo containerizado, sem precisar de terminal separado por serviço —
-mais lento pra iterar (precisa rebuild a cada mudança de código), mas
-único comando.
+Alternativa: `docker compose up -d --build account-service transaction-service
+card-service` sobe tudo containerizado, sem precisar de terminal separado
+por serviço — mais lento pra iterar (precisa rebuild a cada mudança de
+código), mas único comando.
 
 ## 1. Importar o environment
 

@@ -177,3 +177,23 @@ services:
     ports:
       - "8082:8082"
     networks: [financas-net]
+
+  card-service:
+    build:
+      context: ./services/card-service
+      dockerfile: src/main/docker/Dockerfile.jvm
+    container_name: financas-card-service
+    depends_on:
+      mysql: { condition: service_healthy }
+      account-service: { condition: service_started }
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/card_db
+      DB_USER: ${MYSQL_USER:-financas}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-financas}
+      KEYCLOAK_URL: http://keycloak:8080
+      CARD_SERVICE_CLIENT_SECRET: ${CARD_SERVICE_CLIENT_SECRET:-changeit}
+      ACCOUNT_SERVICE_URL: http://account-service:8081
+      OTEL_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8083:8083"
+    networks: [financas-net]

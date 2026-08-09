@@ -1,5 +1,5 @@
-MUDANÇAS MANUAIS NO POSTMAN — account-service e transaction-service
-====================================================================
+MUDANÇAS MANUAIS NO POSTMAN — account-service, transaction-service e card-service
+==================================================================================
 
 Este arquivo existe porque a collection do Postman NÃO é reimportada a
 cada mudança de contrato (o usuário já personalizou a collection importada
@@ -7,9 +7,9 @@ e não quer perder isso). Toda vez que um endpoint mudar, atualize a
 collection manualmente seguindo as instruções abaixo E atualize este
 arquivo na mesma sessão — não deixar acumular mudança sem registrar.
 
-Fonte de verdade do contrato: docs/specs/account-service.yaml e
-docs/specs/transaction-service.yaml (spec-driven). Este arquivo é só um
-guia de "o que mexer na collection à mão".
+Fonte de verdade do contrato: docs/specs/account-service.yaml,
+docs/specs/transaction-service.yaml e docs/specs/card-service.yaml
+(spec-driven). Este arquivo é só um guia de "o que mexer na collection à mão".
 
 
 ------------------------------------------------------------
@@ -269,3 +269,65 @@ GET /api/v1/transacoes-recorrentes/proximos-vencimentos — [endpoint interno]
 Job agendado: GerarOcorrenciasRecorrentesJob roda sozinho (cron diário,
 não é um endpoint) e gera a próxima ocorrência de cada regra ATIVA
 vencida — nada a testar manualmente no Postman aqui.
+
+
+------------------------------------------------------------
+2026-08-09 — card-service: CRUD de cartão (serviço novo)
+------------------------------------------------------------
+
+Serviço novo, porta 8083. Se ainda não tem uma collection pra ele, importe
+de http://localhost:8083/q/openapi (com o serviço rodando) — é a primeira
+vez, então reimportar não perde nada (ver seção 2 do README principal do
+Postman). Depois disso, siga este arquivo pra mudanças futuras, mesmo
+esquema dos outros dois serviços.
+
+Variável de environment nova (mesmo padrão de transaction_service_url):
+card_service_url = http://localhost:8083
+
+POST /api/v1/cartoes — criar cartão
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Header: Content-Type: application/json
+  - Body (raw JSON):
+    {
+      "apelido": "Nubank Roxinho",
+      "bandeira": "MASTERCARD",
+      "limite": 5000.00,
+      "diaFechamento": 5,
+      "diaVencimento": 12,
+      "contaPagamentoId": "<uuid de uma conta sua no account-service, CORRENTE/POUPANCA/CARTEIRA>"
+    }
+    (apelido/limite/diaFechamento/diaVencimento/contaPagamentoId
+    obrigatórios; bandeira opcional, enum VISA/MASTERCARD/ELO/AMEX/OUTRA)
+  - contaPagamentoId é confirmado contra o account-service antes de criar
+    (mesma lógica de "conta precisa existir e ser sua" do transaction-service).
+  - Respostas: 201 (criado) / 400 (campo obrigatório ausente) /
+    404 (contaPagamentoId não existe ou não é sua).
+  - Importante: o account-service precisa estar rodando também.
+
+GET /api/v1/cartoes — listar cartões
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body, sem query params. Resposta: 200, só cartões ativos do usuário.
+
+GET /api/v1/cartoes/{id} — buscar cartão
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Respostas: 200 (mesmo se inativo — só não aparece na listagem) /
+    404 (não existe ou não é seu).
+
+PUT /api/v1/cartoes/{id} — atualizar cartão
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Mesmo body do POST (todos os campos obrigatórios de novo, exceto
+    bandeira). contaPagamentoId é reconfirmado contra o account-service
+    (pode ter mudado pra uma conta que não é sua).
+  - Respostas: 200 / 400 / 404 (cartão ou contaPagamentoId).
+
+DELETE /api/v1/cartoes/{id} — excluir cartão
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Exclusão lógica (ativo=false) — NÃO afeta faturas/compras já
+    existentes (quando esse domínio existir). Idempotente.
+  - Respostas: 204 / 404 (não existe ou não é seu).
+
+Ainda não implementado (fatura/parcelamento) — sem endpoint pra testar
+ainda: POST /cartoes/{id}/compras, GET /cartoes/{id}/faturas,
+GET /faturas/{id}, POST /faturas/{id}/pagar, GET /faturas/proximos-vencimentos.
+Ver docs/specs/card-service.yaml pro contrato completo (já espec'ado,
+código ainda não).
