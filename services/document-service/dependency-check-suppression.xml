@@ -3,26 +3,29 @@
    <suppress>
       <notes><![CDATA[
          Falso positivo (ADR-0017/security.md seção 6) — o OWASP
-         Dependency-Check identifica "quarkus-mongodb-panache" (extensão
-         MongoDB do Quarkus usada pelo document-service) como se fosse o
-         produto "MongoDB Server" (cpe:2.3:a:mongodb:mongodb:*), porque a
-         versão do artefato (ex: 3.38.1, versão do Quarkus) coincide
-         numericamente com uma faixa de versão do MongoDB Server. Não
-         existe MongoDB Server 3.38.1 — o CPE está simplesmente errado
-         pra esse artefato, que é só um cliente/ODM, nunca o banco em si.
-         Suprimido por CVE exato (não por <cpe>) porque o artefato também
-         casa com o CPE correto "quarkus:quarkus", e o dependency-check
-         exige que TODOS os CPEs de uma dependência batam pra uma regra
-         <cpe> suprimir (testado na prática, 2026-08-10 — regra por <cpe>
-         deu "zero matches" mesmo com o CPE certo). Primeira tentativa de
-         supressão (2026-08-10) também errou o nome do artefato
-         (quarkus-mongodb-client em vez de quarkus-mongodb-panache) — CI
-         continuou falhando pelo mesmo motivo até essa correção. Achado
-         real ao subir o CI do document-service pela primeira vez.
+         Dependency-Check identifica os artefatos "quarkus-mongodb-panache"
+         (dependência direta, ODM MongoDB do Quarkus) e
+         "quarkus-mongodb-client" (dependência transitiva dele) como se
+         fossem o produto "MongoDB Server" (cpe:2.3:a:mongodb:mongodb:*),
+         porque a versão do artefato (ex: 3.38.1, versão do Quarkus)
+         coincide numericamente com uma faixa de versão do MongoDB
+         Server. Não existe MongoDB Server 3.38.1 — o CPE está
+         simplesmente errado pra esses artefatos, que são só
+         cliente/ODM, nunca o banco em si. Suprimido por CVE exato (não
+         por <cpe>) porque os artefatos também casam com o CPE correto
+         "quarkus:quarkus", e o dependency-check exige que TODOS os CPEs
+         de uma dependência batam pra uma regra <cpe> suprimir (testado
+         na prática, 2026-08-10 — regra por <cpe> deu "zero matches"
+         mesmo com o CPE certo). Tentativas anteriores (2026-08-10)
+         mudaram o packageUrl pra cobrir só "client" OU só "panache" por
+         vez, sem perceber que os DOIS artefatos existem e são
+         flagados — cada troca só destapava o outro buraco. Regex
+         "quarkus-mongodb-.*" cobre ambos de uma vez. Achado real ao
+         subir o CI do document-service pela primeira vez.
          Revisar em 2027-02-10 (6 meses) ou quando o Dependency-Check
          corrigir esse mapeamento de CPE — o que vier primeiro.
       ]]></notes>
-      <packageUrl regex="true">^pkg:maven/io\.quarkus/quarkus\-mongodb\-panache@.*$</packageUrl>
+      <packageUrl regex="true">^pkg:maven/io\.quarkus/quarkus\-mongodb\-.*@.*$</packageUrl>
       <cve>CVE-2021-32036</cve>
       <cve>CVE-2025-14847</cve>
       <cve>CVE-2026-9753</cve>
