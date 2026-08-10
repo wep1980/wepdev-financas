@@ -2520,3 +2520,63 @@ Alterado: `docker-compose.yml`, `infra/keycloak/realm-financas.json`,
 `docs/architecture/diagrams.md`, `docs/architecture/overview.md`,
 `docs/roadmap.md`, `README.md`, `docs/tasks.md` (item 10, fatia 5
 fechada).
+
+## 2026-08-10 — três correções pós-push do ai-service (CI real pegou o que a validação local não pegou)
+
+Pedido: "sim, pode fazer o commit" seguido de "sim, pode fazer push" — o
+CI do primeiro push falhou três vezes seguidas, cada uma revelando algo
+que só o ambiente real do runner expõe (mesmo padrão de "achado real"
+já visto nas fatias anteriores, dessa vez em série):
+
+1. **`mvnw` sem permissão de execução.** `git core.filemode=false` no
+   Windows fez o `mvnw` do `ai-service` entrar no commit como `100644`
+   em vez de `100755` (os outros cinco serviços têm `100755`) — job
+   falhou com "exit code 126" (permissão negada) antes mesmo de rodar
+   um teste. Corrigido com `git update-index --chmod=+x mvnw` (o `chmod
+   +x` sozinho não basta no Windows, o filesystem não tem bit de
+   execução real — precisa forçar via update-index).
+
+2. **`QdrantColecaoInicializador` derrubava a subida inteira do
+   Quarkus se o Qdrant estivesse fora do ar.** Corrigido o `mvnw`, o CI
+   rodou de verdade e travou nos testes: `Failed to start quarkus`,
+   causa raiz `Connection refused: localhost:6333`. Diferente de
+   MySQL/Kafka/MongoDB (que o Quarkus sobe sozinho via Dev Services/
+   Testcontainers quando não há config explícita de conexão em teste),
+   não existe Dev Service pra um REST client puro como o Qdrant — o
+   runner de CI simplesmente não tem Qdrant disponível. A suíte só
+   passava localmente porque o Qdrant do `docker-compose` já estava de
+   pé na máquina de dev, mascarando o problema. `QdrantColecaoInicializador`
+   só tratava erro HTTP (`WebApplicationException`, ex: 404 pra criar a
+   coleção) — falha de conexão subia como `RuntimeException` não
+   tratada dentro do `@Observes StartupEvent`, derrubando a aplicação
+   inteira. Corrigido pra tratar essa falha como warning (RAG fica
+   indisponível até o Qdrant voltar, mas chat/configuração continuam
+   funcionando) — validado localmente parando o container Qdrant e
+   rodando a suíte de propósito: 64/64 passam mesmo sem Qdrant no ar.
+
+3. **Falso positivo de CVE do `quarkus-mongodb-*`, mesmo problema já
+   resolvido no `document-service`.** Terceiro push corrigiu os testes,
+   CI avançou até o scan de vulnerabilidade e falhou com o EXATO mesmo
+   CPE mal mapeado já diagnosticado e documentado pro `document-service`
+   (`quarkus-mongodb-panache`/`-client` confundidos com "MongoDB
+   Server", CVE-2021-32036/2025-14847/2026-9753/2014-8180) — só não
+   tinha sido replicado pro `ai-service` porque o item 10 nunca rodou o
+   dependency-check localmente (falta de `NVD_API_KEY` fora do CI, mesmo
+   motivo de sempre). Corrigido copiando o mesmo
+   `dependency-check-suppression.xml` do `document-service` (adaptado)
+   + `<suppressionFiles>` no `pom.xml`.
+
+CI verde depois dos três fixes. Lição prática pra próxima fatia com
+Mongo (não tem mais nenhuma planejada, mas vale registrar): sempre
+copiar o `dependency-check-suppression.xml` de um serviço Mongo
+existente **no mesmo item que adiciona `quarkus-mongodb-panache` ao
+pom.xml**, não esperar o dependency-check da fatia nova falhar pra
+lembrar — e todo `mvnw` novo (scaffold copiado no Windows) precisa de
+`git update-index --chmod=+x mvnw` explícito antes do primeiro commit,
+`chmod +x` sozinho não é suficiente nesse ambiente.
+
+Alterado: `services/ai-service/mvnw` (modo 100644→100755),
+`services/ai-service/src/main/java/.../vectorstore/QdrantColecaoInicializador.java`
+(catch de `RuntimeException` genérico, não derruba mais a subida),
+`services/ai-service/pom.xml` (`<suppressionFiles>`). Criado:
+`services/ai-service/dependency-check-suppression.xml`.
