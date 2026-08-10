@@ -45,10 +45,17 @@ public class QdrantColecaoInicializador {
             // (achado real: catch (NotFoundException) nunca disparava, testado via
             // @QuarkusTest, ver docs/historico.md).
             if (e.getResponse().getStatus() != 404) {
-                throw e;
+                LOG.warnf(e, "Erro ao verificar coleção Qdrant '%s' na subida — RAG pode ficar indisponível até normalizar", colecao);
+                return;
             }
             LOG.infof("Coleção Qdrant '%s' não existe, criando (dimensão=%d, distância=%s)", colecao, dimensaoVetor, DISTANCIA);
             restClient.criarColecao(colecao, new QdrantCriarColecaoRequestDto(new QdrantVetorConfigDto(dimensaoVetor, DISTANCIA)));
+        } catch (RuntimeException e) {
+            // Qdrant fora do ar (ex: connection refused, ambiente sem Qdrant como o
+            // runner de CI, que não tem Dev Service pra REST client puro) não pode
+            // derrubar a subida do ai-service inteiro — só o RAG fica indisponível
+            // até o Qdrant voltar; chat/configuração continuam funcionando.
+            LOG.warnf(e, "Qdrant indisponível na subida do ai-service — RAG ficará indisponível até reconectar. Coleção '%s' não verificada.", colecao);
         }
     }
 }
