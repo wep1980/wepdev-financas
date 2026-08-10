@@ -18,7 +18,7 @@ microsserviços em vez de monólito nesse projeto.
 | `account-service` | Contas financeiras (criar, listar, debitar/creditar saldo) | 8081 | MySQL (`account_db`) | ✅ Entregue — CRUD completo + débito/crédito, 45 testes, CI verde |
 | `transaction-service` | Registrar/consultar transações (inclusive recorrentes, ver ADR-0009); chama `account-service` p/ refletir no saldo | 8082 | MySQL (`transaction_db`) | ✅ Entregue — registrar/listar/editar/cancelar/resumo/recorrentes, 91 testes, CI verde |
 | `card-service` | Cartões de crédito, faturas, parcelamento — independente de `TipoConta.CARTAO_CREDITO` (ADR-0022) | 8083 | MySQL (`card_db`) | ✅ Entregue — CRUD de cartão + fatura/parcelamento/pagamento, 82 testes, CI verde |
-| `document-service` | Upload e parsing de fatura (PDF), extrato (PDF/CSV) e boleto de financiamento (PDF/foto, ADR-0014); no mobile, qualquer tipo pode vir por foto (ADR-0015); gera transações pendentes | 8084 | MongoDB (documento bruto + resultado do parsing) + MySQL (referência a transações pendentes) | Planejado |
+| `document-service` | Upload e parsing de fatura de cartão (PDF) via LLM local (Ollama, ADR-0002); extrato (PDF/CSV) e boleto de financiamento (ADR-0014) ficam pra fatias seguintes; no mobile, foto entra também depois (ADR-0015); gera lançamentos pendentes, usuário confirma, evento Kafka vira transação de verdade (ADR-0023) | 8084 | MongoDB (documento bruto + resultado do parsing) + MySQL (lançamentos pendentes) | ✅ Entregue (fatura PDF) — upload assíncrono + extração LLM + confirmação + evento, 100+ testes, CI verde |
 | `budget-service` | Orçamento por categoria/mês, cálculo de "disponível pra gastar" | 8085 | MySQL (`budget_db`) | Planejado |
 | `ai-service` | Orquestração de agentes, RAG, chat em linguagem natural, MCP tools | 8086 | Qdrant (vetores, proposto ADR-0005) + MongoDB (histórico de conversas) | Planejado |
 | `notification-service` | Alertas de vencimento (despesa recorrente, fatura de cartão) via push/WhatsApp/e-mail; preferências de notificação por usuário | 8087 | MongoDB | Planejado |
@@ -43,17 +43,21 @@ definidos — ficam para quando começarmos a fatia de front-end (roadmap #6).
 sequenceDiagram
     participant U as Usuário (front-end)
     participant D as document-service
+    participant A as account-service
     participant K as Kafka
     participant T as transaction-service
-    participant A as account-service
 
-    U->>D: upload fatura.pdf
-    D->>D: parsing (extrai lançamentos, total, vencimento)
-    D-->>U: lançamentos extraídos (status: PENDENTE_CONFIRMACAO)
-    U->>D: confirma lançamentos (todos ou parte)
+    U->>D: POST /documentos (upload fatura.pdf)
+    D-->>U: 202, status RECEBIDO
+    D->>D: processamento em background (PDFBox + LLM, ADR-0024)
+    U->>D: GET /documentos/{id} (polling)
+    D-->>U: status AGUARDANDO_CONFIRMACAO + lançamentos
+    U->>D: POST /documentos/{id}/confirmar (contaId + ids selecionados)
+    D->>A: confirma posse de contaId (síncrono, ADR-0025)
     D->>K: evento "documento.lancamentos-confirmados"
+    D-->>U: 204
     K->>T: consome evento
-    T->>A: débito/crédito síncrono (garante saldo consistente)
+    T->>A: débito/crédito síncrono (sem reverificar posse — já feita acima, ADR-0025)
     T-->>K: evento "transacao.criada"
 ```
 
@@ -62,10 +66,25 @@ lançamentos candidatos, o usuário confirma, e só aí o fluxo já conhecido
 (`transaction-service` → `account-service` síncrono) roda. Isso evita
 "transação fantasma" vinda de parsing errado.
 
+Upload é **assíncrono** (ADR-0024) — testado na prática que a extração via
+LLM local pode levar minutos, não segundos, pra fatura com muitos
+lançamentos; segurar isso numa única requisição HTTP síncrona não era
+viável. Cliente sonda `GET /documentos/{id}` até o status sair de
+`PROCESSANDO`.
+
+Posse de `contaId` (pra saber em qual conta debitar/creditar) é confirmada
+**uma única vez**, no `document-service`, síncrono, no momento da
+confirmação — é o único ponto do fluxo com o token do usuário disponível
+pra propagar pro account-service. O consumer Kafka no `transaction-service`
+não tem requisição HTTP em andamento (logo, sem token) e por isso **confia
+integralmente** nessa verificação já feita (ADR-0025) — não é dado
+opcional, é uma responsabilidade que qualquer produtor futuro desse tópico
+precisa assumir.
+
 O diagrama acima mostra upload de PDF; foto (mobile) entra no mesmo ponto —
-só muda a estratégia de extração usada dentro de "parsing" (ADR-0015), o
-resto do fluxo (confirmação obrigatória, evento, débito/crédito síncrono) é
-idêntico.
+só muda a estratégia de extração usada dentro do processamento em
+background (ADR-0015), o resto do fluxo (confirmação obrigatória, evento,
+débito/crédito síncrono) é idêntico.
 
 ## 4. Fluxo: comando em linguagem natural (`ai-service`)
 

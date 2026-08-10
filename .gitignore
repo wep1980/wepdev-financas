@@ -30,3 +30,8 @@ build/
 # Sistema operacional
 .DS_Store
 Thumbs.db
+
+# Arquivos de referência/teste com dado pessoal real (fatura, extrato, CPF
+# etc.) — nunca versionar, mesmo em repo privado. Ver test-data/README.md.
+test-data/*
+!test-data/README.md

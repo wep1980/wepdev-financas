@@ -44,7 +44,7 @@ graph LR
         AccountSvc["account-service :8081"]
         TxSvc["transaction-service :8082"]
         CardSvc["card-service :8083"]
-        DocSvc["document-service :8084 (planejado)"]
+        DocSvc["document-service :8084"]
         BudgetSvc["budget-service :8085 (planejado)"]
         AiSvc["ai-service :8086 (planejado)"]
         NotifSvc["notification-service :8087 (planejado)"]
@@ -68,6 +68,7 @@ graph LR
     Mobile --> DocSvc
 
     TxSvc -->|síncrono| AccountSvc
+    DocSvc -->|síncrono, confirma posse ADR-0025| AccountSvc
     DocSvc -->|evento| Kafka
     Kafka --> TxSvc
     TxSvc -->|evento| Kafka
@@ -82,6 +83,7 @@ graph LR
     TxSvc --> MySQL
     CardSvc --> MySQL
     BudgetSvc --> MySQL
+    DocSvc --> MySQL
     DocSvc --> Mongo
     AiSvc --> Qdrant
     AiSvc --> Mongo
@@ -208,7 +210,48 @@ Contrato completo em `docs/specs/card-service.yaml`. `Cartao`, `Fatura` e
 implementado) — este ER conceitual segue sendo o mapa rápido de alto
 nível, sem repetir o detalhe de método já coberto lá.
 
-### 3.4 Pendente
+### 3.4 `document-service`
+
+Agregado dividido entre dois bancos (`overview.md`) — metadados +
+conteúdo bruto do PDF no MongoDB (`document_service`), lançamentos
+queryable no MySQL (`document_db`), sem transação distribuída entre os
+dois (ADR-0023, ver `docs/tasks.md` fatia 3 item 2). `contaId` (informado
+só no momento da confirmação, ADR-0025) não é campo persistido do
+agregado — é passagem direta pro evento Kafka.
+
+```mermaid
+erDiagram
+    DOCUMENTO_IMPORTADO ||--o{ LANCAMENTO_PENDENTE : contém
+
+    DOCUMENTO_IMPORTADO {
+        uuid id "MongoDB, _id"
+        uuid usuarioId
+        string tipo "FATURA_CARTAO (único valor na fatia atual)"
+        string nomeArquivo
+        bytes conteudoArquivo "PDF bruto"
+        string status "RECEBIDO|PROCESSANDO|AGUARDANDO_CONFIRMACAO|CONFIRMADO|ERRO_PROCESSAMENTO"
+        string mensagemErro "nullable"
+        datetime criadoEm
+        datetime processadoEm "nullable"
+    }
+    LANCAMENTO_PENDENTE {
+        uuid id "MySQL"
+        uuid documentoId "referência lógica ao Mongo, sem FK real"
+        string descricao
+        decimal valor
+        date data
+        string tipo "RECEITA|DESPESA"
+        string categoriaSugerida "nullable, best-effort"
+        string status "PENDENTE|CONFIRMADO|REJEITADO"
+    }
+```
+
+Contrato completo em `docs/specs/document-service.yaml`. Sem diagrama de
+classe dedicado (seção 4) — o domínio é enxuto o bastante (`DocumentoImportado`/
+`LancamentoPendente`, ver `services/document-service/.../domain`) pra esse
+ER conceitual já cobrir o essencial sem repetição.
+
+### 3.5 Pendente
 
 `budget-service` ainda não tem contrato OpenAPI (roadmap #4) — modelo de
 domínio dele entra aqui quando a spec for escrita (spec-driven, ver

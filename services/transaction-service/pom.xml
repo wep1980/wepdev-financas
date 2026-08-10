@@ -157,6 +157,15 @@
             <version>5.14.2</version>
             <scope>test</scope>
         </dependency>
+        <!-- Consumer Kafka novo (documento.lancamentos-confirmados, ADR-0023) —
+             precisa esperar o processamento assíncrono terminar nos testes
+             de integração, sem sleep arbitrário (mesmo motivo do document-service). -->
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <version>4.2.2</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

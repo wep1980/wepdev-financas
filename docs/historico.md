@@ -1148,3 +1148,352 @@ o contrato já escrito à risca); `docs/architecture/diagrams.md` (seção
 concluída, fatia 3 como próxima); `README.md` (raiz e do serviço);
 `docs/postman/mudancas-manuais.txt`; artifact de diagramas de classe
 republicado.
+
+## 2026-08-09 — `document-service`: kickoff da fatia 3 (infra e spec)
+
+Pedido: "vamos para o proximo passo" → início da fatia 3 (`document-service`).
+Três decisões em aberto foram levantadas e confirmadas pelo usuário antes de
+escrever a spec: (1) estratégia de ingestão por foto — ADR-0015 mudou de
+Proposta pra Aceita, confirmando visão do LLM direto na imagem, sem OCR
+separado; (2) provedor de LLM pra dev/teste — Ollama local, não OpenAI (dado
+financeiro sensível não sai da máquina, sem custo por chamada); (3) escopo
+da primeira fatia vertical — só fatura de cartão em PDF (extrato, boleto e
+foto ficam pra depois).
+
+Consequência de infra: subido serviço `ollama` novo no `docker-compose.yml`
+(porta 11434, volume próprio) e baixado o modelo `llama3.1` (~4.9GB) via
+`ollama pull` dentro do container — validado com uma chamada real de
+chat-completion antes de seguir. Ainda não commitado.
+
+Escrita a spec `docs/specs/document-service.yaml` (upload multipart de PDF,
+listar documentos, buscar detalhe com lançamentos, confirmar lançamentos
+selecionados — publica evento Kafka `documento.lancamentos-confirmados`
+seguindo o fluxo já desenhado em `overview.md` seção 3). Durante o desenho
+da spec surgiu uma ambiguidade não coberta por nenhum documento existente:
+uma fatura importada poderia, em teoria, alimentar o modelo de
+`Fatura`/`Parcela` do `card-service` (fatia 2) em vez de virar `Transacao`
+avulsa. Registrado como [ADR-0023](architecture/adr/0023-document-service-primeira-fatia-escopo.md):
+decidido **não integrar** com `card-service` nessa fatia (evita acoplamento
+novo e especulação sobre um requisito não pedido) e usar **Apache PDFBox**
+pra extração de texto do PDF (mais adotada no ecossistema Java, licença
+compatível).
+
+`docs/tasks.md` reescrito com o backlog detalhado da fatia 3 (11 passos,
+mesmo nível de detalhe dado à fatia 2 originalmente) — nenhum código de
+`document-service` foi escrito ainda, próximo passo é o scaffold do
+serviço.
+
+Criado: `docs/specs/document-service.yaml`,
+`docs/architecture/adr/0023-document-service-primeira-fatia-escopo.md`.
+Alterado: `docs/architecture/adr/0015-ingestao-foto-visao-llm.md` (status →
+Aceita), `docker-compose.yml` (serviço `ollama`), `docs/tasks.md` (fatia 3
+detalhada).
+
+## 2026-08-09 — `document-service`: itens 2–5 do backlog (domínio até validação real)
+
+Pedido: continuar a fatia 3 item a item ("sim" repetido) até chegar no
+pedido explícito de testar com uma fatura real que o usuário tinha em mãos
+— fatura Santander, no nome da titular (mãe/parente), com o uso do usuário
+aparecendo como dependente numa seção própria, e protegida por senha (CPF
+do titular). Usuário perguntou se dava pra abrir a fatura sem digitar CPF
+toda vez — resposta foi que dá pra automatizar (PDFBox aceita senha via
+código), só não dá pra abrir um PDF criptografado sem NENHUMA senha válida.
+
+Criada pasta `test-data/` (raiz do projeto, gitignored exceto o README) pra
+guardar esse tipo de arquivo de referência com dado real de terceiro — não
+podia ir pro histórico do git mesmo em repo privado.
+
+Implementado nessa sessão: domínio completo (`DocumentoImportado`,
+`LancamentoPendente`, persistência dividida Mongo+MySQL), porta
+`LlmProvider` + `OllamaLlmProvider`, extração de PDF via PDFBox +
+`AgenteExtracaoFaturaService` (agente de parsing). Documentado em detalhe
+nos itens 2–4 de `docs/tasks.md`.
+
+O item 5 (validação com a fatura real) só passou depois de resolver três
+problemas de verdade, nenhum previsto no design original:
+1. PDF protegido por senha — `ExtratorTexto` ganhou parâmetro `senha` +
+   `PdfProtegidoPorSenhaException`.
+2. Existe um Ollama **nativo instalado no Windows**, fora do Docker,
+   escutando especificamente `127.0.0.1:11434` — roubava toda conexão
+   IPv4 pra "localhost:11434" mesmo com o container Docker publicando a
+   mesma porta (bind mais específico do Windows vence o wildcard do Docker
+   Desktop), causando um 404 "model not found" bem enganoso (o Ollama
+   respondendo não era o container, que tinha o modelo baixado). Resolvido
+   remapeando a porta do container pra 11500 no host.
+3. A fatura real tem titular + dependente em seções separadas, e um prompt
+   de ~14KB pedindo pro LLM (`llama3.1` local, 8B) achar a seção certa E
+   montar o JSON no formato pedido não funcionou de forma confiável — o
+   modelo às vezes inventava outro esquema JSON inteiro. Resolvido movendo
+   esse trabalho pro código Java: `AgenteExtracaoFaturaService` agora
+   recorta a seção da pessoa certa por regex no cabeçalho de cada cartão
+   (exigindo primeiro E último nome do filtro baterem, pra não confundir
+   com sobrenome de família compartilhado) e detecta o ano da fatura pela
+   linha "Vencimento", ANTES de montar o prompt — o LLM só recebe ~5KB já
+   filtrado e só precisa extrair lançamentos, não mais filtrar nem inferir
+   ano. Resultado: 38 lançamentos extraídos corretamente restritos à seção
+   do dependente, conferidos manualmente contra o PDF (datas/valores
+   batendo). Duas imperfeições aceitas como esperadas do modelo local (não
+   bloqueantes, dado que o fluxo exige confirmação do usuário antes de
+   qualquer coisa virar transação — PRD 3.2): 2 de 10 parcelas idênticas
+   de um mesmo comerciante descartadas, e 3 estornos vieram como `DESPESA`
+   em vez de `RECEITA`.
+
+Achado anotado pra quando o item 6 (endpoint de upload) for implementado,
+não resolvido ainda: inferência local em CPU levou vários **minutos** (não
+segundos) pra gerar ~40 lançamentos, mesmo já com o prompt reduzido — a
+spec atual descreve o upload como síncrono (resposta 201 já com os
+lançamentos), o que pode não aguentar fatura grande numa única requisição
+HTTP. O domínio já modela um estado `PROCESSANDO` intermediário, então dá
+pra virar assíncrono/polling sem redesenhar nada, só mexer na spec/REST.
+
+Criado (`services/document-service/`): domínio completo, persistência
+(Mongo + MySQL + migração Flyway), `LlmProvider`/`OllamaLlmProvider`,
+`ExtratorTexto`/`PdfBoxExtratorTexto`, `AgenteExtracaoFaturaService`, 62
+testes automatizados + 1 teste manual/exploratório
+(`ExtracaoFaturaRealManualTest`, roda só localmente contra `test-data/` e
+Ollama real, se auto-pula em CI). Criado `test-data/README.md`. Alterado:
+`docker-compose.yml` (porta do `ollama` 11434→11500 no host),
+`application.properties` do `document-service`, `.gitignore` (regra pra
+`test-data/`), `docs/tasks.md` (itens 2–5 detalhados).
+
+## 2026-08-09 — `document-service`: itens 6–7 (upload assíncrono + GET)
+
+Pedido: "vamos seguir a sua sugestão" (tornar o upload assíncrono, dado o
+achado do item anterior de que a inferência local leva minutos) + usuário
+colocou mais faturas reais em `test-data/` (Itaú PDF sem senha, Nubank PDF
+fechada, Nubank CSV — CSV é fatura ainda aberta, PDF é fatura fechada;
+CSV fica fora de escopo por enquanto, ADR-0023 já limitou essa fatia a
+PDF).
+
+Registrado [ADR-0024](architecture/adr/0024-upload-documento-assincrono.md):
+`POST /documentos` deixa de ser síncrono. Spec (`document-service.yaml`)
+atualizada: resposta 202 imediata (status `RECEBIDO`, sem lançamento),
+cliente sonda `GET /documentos/{id}` até sair de `PROCESSANDO`; ganhou
+também os campos `senha` e `nomeFiltro` no multipart (achados reais da
+sessão anterior, agora expostos na API de verdade).
+
+Implementado: `UploadDocumentoUseCase` (persiste RECEBIDO, só depois
+despacha `ProcessarDocumentoService` via `ManagedExecutor` — nessa ordem,
+nunca a inversa, senão o job assíncrono pode rodar antes da transação
+commitar), `ProcessarDocumentoService` (RECEBIDO→PROCESSANDO→
+AGUARDANDO_CONFIRMACAO/ERRO_PROCESSAMENTO), `ListarDocumentosUseCase`,
+`BuscarDocumentoUseCase`, `DocumentoResource` (upload multipart, listagem,
+detalhe).
+
+Dois achados técnicos reais no caminho: (1) leitura JPA via Hibernate ORM
+Panache também precisa de transação/contexto ativo quando chamada de uma
+thread do `ManagedExecutor` (fora do request HTTP) — `buscarPorId()` do
+repositório teve que ganhar `@Transactional` também, não só `salvar()`;
+(2) MongoDB com `@BsonId` do tipo `UUID` exige
+`quarkus.mongodb.uuid-representation=standard` explícito no
+`application.properties`, senão `CodecConfigurationException` ao gravar
+(só apareceu ao rodar teste de integração de verdade, não no `compile`).
+
+Testes: 24 novos — 5 unitários (`UploadDocumentoUseCaseTest`,
+`ProcessarDocumentoServiceTest`, `ListarDocumentosUseCaseTest`,
+`BuscarDocumentoUseCaseTest`) + `DocumentoResourceTest` com 9 cenários de
+integração (`@QuarkusTest` + Testcontainers Mongo/MySQL, `LlmProvider`
+mockado via `QuarkusMock.installMockForType` — mesmo padrão do
+`AccountServiceClientImpl` no card-service — e `Awaitility` pra esperar o
+processamento assíncrono terminar sem sleep arbitrário, dependência de
+teste nova, primeiro serviço com fluxo assíncrono). 70 testes no total do
+`document-service` agora, suite inteira verde.
+
+Criado: `docs/architecture/adr/0024-upload-documento-assincrono.md`,
+`UploadDocumentoCommand`, `UploadDocumentoUseCase`,
+`ProcessarDocumentoService`, `ListarDocumentosUseCase`,
+`BuscarDocumentoUseCase`, `DocumentoResource` + DTOs
+(`DocumentoImportadoResponse`, `LancamentoPendenteResponse`,
+`UploadDocumentoForm`, `ErroResponse`), `DocumentoNaoEncontradoExceptionMapper`.
+Alterado: `docs/specs/document-service.yaml` (upload assíncrono, campos
+`senha`/`nomeFiltro`), `DocumentoRepositoryImpl` (`@Transactional` em
+`salvar()` e `buscarPorId()`), `application.properties`
+(`quarkus.mongodb.uuid-representation`), `pom.xml` (Awaitility, teste),
+`docs/tasks.md` (itens 6–7 detalhados).
+
+## 2026-08-09 — `document-service`: validação com Itaú/Nubank + item 8 (confirmação + Kafka)
+
+Pedido: testar a extração com as faturas reais adicionais que o usuário
+colocou em `test-data/` (Itaú PDF sem senha, Nubank PDF fechado — os CSVs
+do Nubank são fatura ainda aberta, fora de escopo por ora) e, em seguida,
+implementar o item 8 do backlog (endpoint de confirmação).
+
+Fatura Itaú: resultado excelente, 10 lançamentos, soma batendo 100% com o
+total do PDF — o LLM até excluiu sozinho o "Pagamento efetuado" e a
+parcela de próxima fatura, sem instrução explícita. Fatura Nubank:
+primeira tentativa deu 0 lançamentos (todos descartados silenciosamente,
+best-effort) — a causa era um bug real, não limitação do modelo: o Nubank
+escreve data como "10 JUN" (dia + mês abreviado em português) e vencimento
+como "17 JUL 2026", formato bem diferente do "DD/MM"/"DD/MM/AAAA" do
+Santander/Itaú que o parser só sabia ler. Corrigido com um segundo
+formato de parsing em `LancamentoExtraidoDto.parsearData` (mapeamento
+manual JAN–DEZ) e `AgenteExtracaoFaturaService.detectarAnoReferencia`.
+Depois do fix: 11 lançamentos, soma batendo com o subtotal do cartão.
+
+Implementado o item 8: `POST /api/v1/documentos/{id}/confirmar`. Ao
+desenhar isso apareceu um gap real na spec — pra criar uma `Transacao` de
+verdade, o `transaction-service` precisa saber em qual conta debitar, e o
+document-service nunca teve essa informação (ADR-0023, sem integração com
+card-service). Resolvido adicionando `contaId` obrigatório em
+`ConfirmarLancamentosRequest` — decidido no momento da confirmação, não do
+upload. `DocumentoEventPublisher` publica UM evento
+`documento.lancamentos-confirmados` (Kafka) com a lista de lançamentos
+confirmados + `contaId`; idempotente (documento já `CONFIRMADO` não
+republica). Dois `ExceptionMapper` novos (422): `NenhumLancamentoSelecionadoException`
+(lista vazia) e `DocumentoAindaNaoProcessadoException` (documento fora do
+status `AGUARDANDO_CONFIRMACAO`, esse já existia no domínio desde o item 2).
+
+Também corrigido um bug real no `ExtracaoFaturaRealManualTest`: sem
+`FATURA_TESTE_ARQUIVO` explícito, ele pegava o primeiro PDF em ordem
+alfabética de `test-data/` — com múltiplas faturas de bancos diferentes
+lá agora, isso quebrava `mvn test` sempre que o primeiro arquivo exigia
+senha e nenhuma senha estava configurada. Agora exige escolha explícita
+do arquivo, senão pula de verdade (self-skip).
+
+58 testes no total do `document-service`, suite inteira verde. Consumer
+Kafka no `transaction-service` (item 9) ainda não existe — o evento é
+publicado mas ninguém consome ainda.
+
+Criado: `docs/architecture/adr` nenhum novo (mudança de spec, não de
+arquitetura); `ConfirmarLancamentosCommand`, `ConfirmarLancamentosUseCase`,
+`DocumentoEventPublisher` (porta) + `DocumentoEventPublisherImpl`,
+`DocumentoLancamentosConfirmadosEvento`, `LancamentoConfirmadoPayload`,
+`NenhumLancamentoSelecionadoException` + mapper,
+`DocumentoAindaNaoProcessadoExceptionMapper`, `ConstraintViolationExceptionMapper`,
+DTOs (`ConfirmarLancamentosRequest`, `ErroValidacaoResponse`).
+Alterado: `docs/specs/document-service.yaml` (`contaId` no confirmar),
+`LancamentoExtraidoDto`/`AgenteExtracaoFaturaService` (parsing de data
+"DD MES"), `ExtracaoFaturaRealManualTest` (self-skip corrigido),
+`docs/tasks.md` (item 8 detalhado + achados Itaú/Nubank).
+
+Também nessa sessão: usuário reportou problema de acentuação no
+`application.properties` do `card-service`. Investigado — nenhum arquivo
+do repositório tem encoding realmente corrompido (varredura completa
+confirmou UTF-8 válido em tudo); causa era o IntelliJ ter um encoding
+default separado pra arquivos `.properties` (`ISO-8859-1`, herança do
+`java.util.Properties` legado). Corrigido com `.idea/encodings.xml`
+(local, gitignored, força UTF-8 no projeto todo) e `.editorconfig` novo
+na raiz (commitado, `charset = utf-8` geral).
+
+## 2026-08-09 — item 9: consumer Kafka no `transaction-service` (fecha o fluxo de ponta a ponta)
+
+Pedido: "vamos para o item 9" — o último passo do fluxo desenhado em
+`overview.md` seção 3, consumir o evento que o document-service publica e
+criar a `Transacao` de verdade.
+
+Achado real ao desenhar isso (documentado em
+[ADR-0025](architecture/adr/0025-confirmacao-posse-conta-antes-do-evento.md)):
+o padrão já usado pra debitar conta (`AccountServiceClient.debitar()` em
+`transaction-service`) confirma posse da conta propagando o **token do
+usuário do request HTTP recebido**. Um consumer Kafka não tem requisição
+em andamento — não existe token pra propagar, e o endpoint `GET /contas/{id}`
+do account-service é `@RolesAllowed("usuario")` só (não aceita role
+`service`), então nem dava pra trocar pelo cliente de serviço direto.
+
+Resolvido movendo a verificação de posse pra **um lugar só**: dentro de
+`ConfirmarLancamentosUseCase` no document-service (item 8), que roda numa
+requisição HTTP síncrona com o token do usuário disponível — mesmo padrão
+de dois tokens já usado em card-service/transaction-service
+(`AccountServiceUsuarioClient` + `PropagarAutorizacaoHeadersFactory`).
+Isso exigiu dar ao `document-service` sua primeira integração de verdade
+com o `account-service` (só `confirmarPosseDaConta`, nada mais — não é
+integração com card-service, isso continua fora de escopo, ADR-0023). O
+consumer Kafka no transaction-service **não reverifica** — confia
+integralmente na checagem já feita, e vai direto pro débito/crédito via
+dois métodos novos na porta `AccountServiceClient`
+(`debitarSemConfirmarPosse`/`creditarSemConfirmarPosse`, sem a etapa de
+`GET /contas/{id}`).
+
+Implementado: `DocumentoLancamentosConfirmadosConsumer` (`@Incoming`),
+`ProcessarLancamentosConfirmadosUseCase` (cria uma `Transacao` por
+lançamento confirmado, débito/crédito real síncrono com account-service),
+DTOs espelhando o payload do document-service (serviços diferentes não
+compartilham código, mesmo formato JSON) e um
+`ObjectMapperDeserializer` (primeiro consumer Kafka do projeto).
+
+Validado com um teste de integração que publica um evento JSON real
+direto no tópico via Kafka Dev Services (o mesmo broker que o consumer
+real está ouvindo) — não só teste unitário com mock, a fiação inteira
+(deserializer → consumer → caso de uso → débito mockado no
+account-service → `Transacao` persistida) foi exercitada de verdade.
+Achado técnico no caminho: ler um repositório dentro do corpo de um teste
+(fora de uma requisição HTTP) também precisa de contexto/transação
+explícitos (`QuarkusTransaction.requiringNew().call(...)`) — mesma
+família do `ContextNotActiveException` já visto no document-service com
+`ManagedExecutor`, dessa vez do lado do teste, não da aplicação.
+
+Isso fecha o fluxo de ponta a ponta descrito em `overview.md` seção 3:
+upload de fatura → extração via LLM → confirmação (com verificação de
+posse de conta) → evento Kafka → consumer → `Transacao` criada com
+débito real no `account-service`. 97 testes no `transaction-service`
+(14 novos), suite inteira verde.
+
+Criado: `docs/architecture/adr/0025-confirmacao-posse-conta-antes-do-evento.md`;
+`document-service`: `AccountServiceClient` (porta) + impl,
+`AccountServiceUsuarioClient`, `PropagarAutorizacaoHeadersFactory`,
+`ContaNaoEncontradaException` + mapper; `transaction-service`:
+`DocumentoLancamentosConfirmadosConsumer`,
+`ProcessarLancamentosConfirmadosUseCase`,
+`DocumentoLancamentosConfirmadosEvento`/`LancamentoConfirmadoPayload`,
+`DocumentoLancamentosConfirmadosDeserializer`. Alterado:
+`ConfirmarLancamentosUseCase` (chama `confirmarPosseDaConta` antes de
+publicar), `AccountServiceClient`/`AccountServiceClientImpl` do
+transaction-service (métodos `SemConfirmarPosse`),
+`docs/specs/document-service.yaml` (404 novo no confirmar),
+`application.properties` dos dois serviços, `pom.xml` do
+transaction-service (Awaitility), `docs/tasks.md` (item 9 detalhado).
+
+## 2026-08-09 — item 11: fecha a fatia 3 (docker-compose, CI, Keycloak, Postman, diagramas)
+
+Pedido: "vamos para o item 11" — a parte de "arrumar a casa" antes de
+considerar o `document-service` pronto: infra, CI, documentação viva.
+
+`docker-compose.yml` ganhou o serviço `document-service` (depende de
+mysql/mongo/kafka/ollama/account-service) — subido e validado de verdade
+contra a stack real: build limpo, start sem erro, Flyway/Mongo/Kafka
+todos conectando certo, healthcheck 200. `document_db` criado (script de
+init + aplicado direto no container MySQL já rodando, mesmo padrão das
+fatias anteriores — o script só roda em volume novo).
+
+Keycloak: client `document-service` registrado com `bearerOnly: true`,
+**sem** service-account — diferente dos outros três serviços, porque
+`document-service` nunca chama outro serviço via client_credentials (só
+propaga o token do próprio usuário pro `account-service`, ADR-0025), então
+não precisa de client secret nem client_credentials habilitado. Aplicado
+também no realm já importado no container (mesmo motivo de sempre: o
+JSON só é lido no primeiro boot do Keycloak).
+
+CI: job `document-service` novo em `ci.yml`, mesmo template dos outros
+três (testes + cobertura JaCoCo + build de imagem Docker de validação +
+OWASP Dependency-Check), `document-service` adicionado ao filtro de paths
+do job `changes`. Não rodei o dependency-check localmente (a `NVD_API_KEY`
+só existe como secret do GitHub, nunca guardada localmente por design) —
+fica pro CI validar quando for commitado/pushado.
+
+Postman: os 4 endpoints do `document-service` documentados em
+`mudancas-manuais.txt` (upload multipart, listagem, detalhe/polling,
+confirmar) + `document_service_url` no environment.
+
+Documentação viva atualizada pra refletir a fatia entregue, não mais
+planejada: `diagrams.md` (container graph sem mais "(planejado)", aresta
+síncrona nova pro account-service, seção 3.4 nova com o ER conceitual de
+`DocumentoImportado`/`LancamentoPendente`), `overview.md` (tabela de
+serviços + o diagrama de sequência da seção 3 reescritos pra refletir o
+fluxo assíncrono de verdade — upload 202 + polling + confirmação com
+verificação de posse — não mais o desenho síncrono original de quando a
+fatia começou), `roadmap.md` (fatia 3 → ✅ Entregue), `README.md` raiz
+(parágrafo do serviço, tabela de endpoints, URLs de Mongo/Ollama).
+
+Isso fecha a fatia 3 do roadmap. Escopo que ficou de fora de propósito
+(não é dívida técnica esquecida, é escolha registrada em ADR-0004/0023):
+extrato bancário (PDF/CSV), boleto de financiamento e ingestão por foto
+via mobile — todos ficam pra uma fatia futura, quando fizer sentido
+retomar.
+
+Alterado: `docker-compose.yml`, `infra/mysql/init/01-databases.sql`,
+`infra/keycloak/realm-financas.json`, `.github/workflows/ci.yml`,
+`docs/postman/mudancas-manuais.txt`,
+`docs/postman/financas-dev.postman_environment.json`,
+`docs/architecture/diagrams.md`, `docs/architecture/overview.md`,
+`docs/roadmap.md`, `README.md`, `docs/tasks.md` (itens 10–11, fatia 3
+fechada).
