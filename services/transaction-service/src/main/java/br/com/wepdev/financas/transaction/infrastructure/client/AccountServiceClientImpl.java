@@ -40,6 +40,23 @@ public class AccountServiceClientImpl implements AccountServiceClient {
         internoClient.creditar(contaId, new AjusteSaldoRequestDto(valor));
     }
 
+    @Override
+    public void debitarSemConfirmarPosse(UUID contaId, BigDecimal valor) {
+        try {
+            internoClient.debitar(contaId, new AjusteSaldoRequestDto(valor));
+        } catch (WebApplicationException e) {
+            if (e.getResponse().getStatus() == 422) {
+                throw new SaldoInsuficienteException(contaId);
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public void creditarSemConfirmarPosse(UUID contaId, BigDecimal valor) {
+        internoClient.creditar(contaId, new AjusteSaldoRequestDto(valor));
+    }
+
     /** Reusa o 404 do account-service (conta inexistente OU de outro usuário) como gate de autorização. */
     private void confirmarPosse(UUID contaId) {
         try {

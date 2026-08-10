@@ -2,4 +2,6 @@ CREATE DATABASE IF NOT EXISTS transaction_db CHARACTER SET utf8mb4;
 GRANT ALL PRIVILEGES ON transaction_db.* TO 'financas'@'%';
 CREATE DATABASE IF NOT EXISTS card_db CHARACTER SET utf8mb4;
 GRANT ALL PRIVILEGES ON card_db.* TO 'financas'@'%';
+CREATE DATABASE IF NOT EXISTS document_db CHARACTER SET utf8mb4;
+GRANT ALL PRIVILEGES ON document_db.* TO 'financas'@'%';
 FLUSH PRIVILEGES;

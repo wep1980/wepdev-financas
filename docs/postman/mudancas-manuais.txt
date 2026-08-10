@@ -1,4 +1,5 @@
-MUDANÇAS MANUAIS NO POSTMAN — account-service, transaction-service e card-service
+MUDANÇAS MANUAIS NO POSTMAN — account-service, transaction-service,
+card-service e document-service
 ==================================================================================
 
 Este arquivo existe porque a collection do Postman NÃO é reimportada a
@@ -399,3 +400,66 @@ nada a testar manualmente no Postman aqui. Pra testar o pagamento sem
 esperar o cron, force o status da fatura pra FECHADA direto no banco
 (UPDATE faturas SET status='FECHADA' WHERE id='...') — é o que foi feito
 pra validar o fluxo de pagamento real nesta sessão.
+
+
+------------------------------------------------------------
+2026-08-09 — document-service: serviço novo (fatia 3, upload de fatura)
+------------------------------------------------------------
+
+Variável de environment nova: document_service_url = http://localhost:8084
+
+Fluxo é ASSÍNCRONO (ADR-0024) — upload responde 202 na hora, extração
+(PDFBox + LLM local via Ollama) roda em background e pode levar de
+segundos a MINUTOS dependendo do tamanho da fatura. Sonde
+GET /api/v1/documentos/{id} até o status sair de PROCESSANDO.
+
+POST /api/v1/documentos — upload de fatura (multipart/form-data)
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Body (form-data, não JSON):
+    arquivo    = (File) o PDF da fatura
+    tipo       = FATURA_CARTAO (único valor aceito nessa fatia)
+    nomeFiltro = (Text, opcional) nome do titular/dependente cuja seção
+                 extrair, se a fatura listar uso de mais de uma pessoa
+                 (ex: cartão adicional) — omitir extrai a fatura inteira
+    senha      = (Text, opcional) senha do PDF, se protegido (comum em
+                 fatura de banco brasileira usar o CPF do titular)
+  - Resposta: 202 com o documento em status RECEBIDO, lançamentos ainda
+    vazio / 400 (arquivo ausente ou tipo inválido).
+
+GET /api/v1/documentos — listar documentos importados
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Query param opcional: status=AGUARDANDO_CONFIRMACAO (ou
+    RECEBIDO/PROCESSANDO/CONFIRMADO/ERRO_PROCESSAMENTO)
+  - Resposta: 200, lista mais recente primeiro.
+
+GET /api/v1/documentos/{id} — buscar documento com lançamentos
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - É esse endpoint que você fica chamando (polling) depois do upload até
+    o status sair de PROCESSANDO.
+  - Resposta: 200 (inclui lista de lançamentos, cada um com id/descricao/
+    valor/data/tipo/categoriaSugerida/status) / 404 (não existe ou não é
+    seu).
+
+POST /api/v1/documentos/{id}/confirmar — confirmar lançamentos
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Body:
+    {
+      "contaId": "uuid-de-uma-conta-sua-no-account-service",
+      "lancamentoIdsConfirmados": ["uuid-do-lancamento-1", "uuid-2"]
+    }
+    (contaId é a conta que vai debitar/creditar — precisa existir no
+    account-service e ser sua, confirmado antes de publicar o evento;
+    lancamentoIdsConfirmados: os que existem no documento mas não estão
+    na lista viram REJEITADO, não geram transação)
+  - Publica evento Kafka "documento.lancamentos-confirmados" — o
+    transaction-service consome e cria uma Transacao por lançamento
+    confirmado (débito/crédito real na contaId, síncrono).
+  - Idempotente: confirmar de novo um documento já CONFIRMADO continua
+    204, sem publicar evento de novo.
+  - Respostas: 204 / 404 (documento ou contaId não existe/não é seu) /
+    422 (documento ainda não terminou de processar, ou lista de
+    lançamentos vazia).
+  - Importante: account-service E transaction-service precisam estar
+    rodando também (e o transaction-service precisa ter o consumer
+    ligado — nada visível na resposta HTTP indica se a Transacao foi
+    criada, confira em GET /api/v1/transacoes do transaction-service).

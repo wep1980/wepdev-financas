@@ -1,0 +1,224 @@
+openapi: 3.0.3
+info:
+  title: Document Service - Sistema de Finanças Pessoais
+  description: >
+    Ingestão de documentos financeiros (fatura de cartão, extrato bancário,
+    boleto — ADR-0004) via upload, extração de lançamentos candidatos
+    (LLM ou determinística conforme o tipo, ver ADR-0002/ADR-0014) e fluxo
+    de confirmação obrigatória do usuário antes de gerar transação de
+    verdade (PRD 3.2). V1 cobre só fatura de cartão em PDF — extrato,
+    boleto e foto entram em fatias seguintes (ver docs/tasks.md).
+    Documento nunca gera transação sozinho: publica evento Kafka
+    "documento.lancamentos-confirmados" só depois da confirmação, que o
+    transaction-service consome (docs/architecture/overview.md seção 3).
+    Upload é assíncrono (testado na prática, 2026-08-09: extração real com
+    LLM local em CPU leva minutos, não segundos, pra fatura com muitos
+    lançamentos) — cliente sonda GET /documentos/{id} até o status sair de
+    PROCESSANDO.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8084
+paths:
+  /api/v1/documentos:
+    post:
+      summary: >
+        Faz upload de um documento (v1: só PDF de fatura de cartão).
+        Processamento é ASSÍNCRONO: a resposta volta assim que o arquivo é
+        recebido e validado, com status RECEBIDO e nenhum lançamento ainda
+        — a extração (PDFBox + LLM) roda em background. Cliente sonda
+        GET /documentos/{id} até o status virar AGUARDANDO_CONFIRMACAO (deu
+        certo, lançamentos disponíveis) ou ERRO_PROCESSAMENTO (deu errado,
+        ver mensagemErro). Nada é persistido como transação em nenhum caso.
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [arquivo, tipo]
+              properties:
+                arquivo:
+                  type: string
+                  format: binary
+                  description: Arquivo PDF da fatura
+                tipo:
+                  type: string
+                  enum: [FATURA_CARTAO]
+                  description: Lista fechada em v1 — EXTRATO_BANCARIO e BOLETO_FINANCIAMENTO entram em fatias seguintes (ADR-0004)
+                nomeFiltro:
+                  type: string
+                  nullable: true
+                  description: >
+                    Nome do titular/dependente cuja seção deve ser extraída,
+                    quando a fatura lista o uso de mais de uma pessoa (ex:
+                    cartão adicional) — testado na prática, 2026-08-09.
+                    Omitido/nulo extrai a fatura inteira como se fosse de
+                    uma pessoa só.
+                senha:
+                  type: string
+                  nullable: true
+                  description: >
+                    Senha do PDF, se protegido (comum em fatura de banco
+                    brasileira usar o CPF do titular) — testado na prática,
+                    2026-08-09. Nunca logada; usada só pra abrir o arquivo.
+      responses:
+        "202":
+          description: Documento recebido, processamento assíncrono iniciado (status RECEBIDO)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentoImportadoResponse" }
+        "400":
+          description: Arquivo ausente ou tipo inválido (validação síncrona, antes de qualquer processamento)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroResponse" }
+    get:
+      summary: Lista os documentos importados pelo usuário autenticado, mais recente primeiro
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [RECEBIDO, PROCESSANDO, AGUARDANDO_CONFIRMACAO, CONFIRMADO, ERRO_PROCESSAMENTO] }
+      responses:
+        "200":
+          description: Lista de documentos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DocumentoImportadoResponse" }
+
+  /api/v1/documentos/{id}:
+    get:
+      summary: Busca um documento importado pelo id, com os lançamentos (pendentes ou já confirmados/rejeitados) que ele gerou
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Documento encontrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentoImportadoResponse" }
+        "404":
+          description: Documento não encontrado (ou pertence a outro usuário)
+
+  /api/v1/documentos/{id}/confirmar:
+    post:
+      summary: >
+        Confirma (todos ou parte) os lançamentos pendentes desse documento —
+        só esses viram transação de verdade. Publica UM evento Kafka
+        "documento.lancamentos-confirmados" com a lista confirmada; o
+        transaction-service consome e cria as transações (débito/crédito
+        síncrono com account-service). Idempotente: confirmar de novo um
+        documento já CONFIRMADO não publica evento de novo (204 direto).
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmarLancamentosRequest"
+      responses:
+        "204":
+          description: Lançamentos selecionados confirmados (evento publicado) — ou já estava confirmado (idempotente)
+        "404":
+          description: >
+            Documento não encontrado (ou pertence a outro usuário), OU
+            contaId não encontrada/não pertence ao usuário (verificado
+            contra o account-service antes de publicar o evento, ADR-0025)
+        "422":
+          description: >
+            Documento ainda não terminou de processar (status diferente de
+            AGUARDANDO_CONFIRMACAO), ou nenhum lançamento foi selecionado
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/realms/financas/.well-known/openid-configuration
+  schemas:
+    ConfirmarLancamentosRequest:
+      type: object
+      required: [contaId, lancamentoIdsConfirmados]
+      properties:
+        contaId:
+          type: string
+          format: uuid
+          description: >
+            Conta (account-service) que vai debitar/creditar os lançamentos
+            confirmados — o document-service não sabe disso sozinho (ADR-0023,
+            não integra com card-service), então o usuário escolhe no momento
+            da confirmação. Todos os lançamentos confirmados nessa chamada
+            vão pra essa mesma conta; se precisar de contas diferentes, são
+            confirmações separadas.
+        lancamentoIdsConfirmados:
+          type: array
+          items: { type: string, format: uuid }
+          description: >
+            Ids dos LancamentoPendente que o usuário revisou e quer
+            confirmar — os que existem no documento mas não estão nessa
+            lista viram REJEITADO (não geram transação). Lista vazia é
+            inválida (422) — se o usuário não quer nada, o fluxo é
+            simplesmente não confirmar.
+
+    DocumentoImportadoResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        tipo: { type: string, enum: [FATURA_CARTAO] }
+        nomeArquivo: { type: string }
+        status: { type: string, enum: [RECEBIDO, PROCESSANDO, AGUARDANDO_CONFIRMACAO, CONFIRMADO, ERRO_PROCESSAMENTO] }
+        mensagemErro:
+          type: string
+          nullable: true
+          description: Preenchido só quando status = ERRO_PROCESSAMENTO
+        lancamentos:
+          type: array
+          items: { $ref: "#/components/schemas/LancamentoPendenteResponse" }
+        criadoEm: { type: string, format: date-time }
+        processadoEm:
+          type: string
+          format: date-time
+          nullable: true
+
+    LancamentoPendenteResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        documentoId: { type: string, format: uuid }
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+        data: { type: string, format: date }
+        tipo: { type: string, enum: [RECEITA, DESPESA] }
+        categoriaSugerida:
+          type: string
+          nullable: true
+          description: Categorização best-effort (PRD 3.2) — usuário pode corrigir na confirmação (fora do escopo v1 mudar aqui, é fixa no momento da extração)
+        status: { type: string, enum: [PENDENTE, CONFIRMADO, REJEITADO] }
+
+    ErroResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+    ErroValidacaoResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+        erros:
+          type: array
+          items:
+            type: object
+            properties:
+              campo: { type: string }
+              mensagem: { type: string }

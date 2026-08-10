@@ -1,6 +1,6 @@
 # ADR-0015: Ingestão de documento por foto (mobile) via visão do LLM, sem OCR separado
 
-Status: Proposta (recomendação minha — confirmar antes de implementar a fatia de `document-service`)
+Status: Aceita (confirmada pelo usuário em 2026-08-09, ao iniciar a fatia `document-service`)
 Data: 2026-08-06
 
 ## Contexto
@@ -14,7 +14,7 @@ fatura/extrato; (b) enviar a foto direto pra um LLM com capacidade de visão
 Ollama), deixando o próprio modelo extrair os campos estruturados da imagem,
 sem etapa de OCR separada.
 
-## Decisão (proposta)
+## Decisão
 
 Opção (b). Estender a porta `LlmProvider` (ADR-0002) com suporte a entrada de
 imagem (ex: `chat(ChatRequest)` passa a aceitar um anexo de imagem opcional,
@@ -37,8 +37,11 @@ visão.
 - Foto de documento financeiro é dado sensível — vale o mesmo cuidado de
   privacidade já registrado pra texto (PRD seção 4): se for OpenAI, a foto
   sai pra fora; se for Ollama local, não sai.
-- **Ação pendente**: essa é uma recomendação minha, não uma decisão sua
-  ainda — confirmar antes de implementar `document-service` (roadmap #3).
-  Alternativa mais conservadora, se preferir: OCR tradicional gerando texto,
-  reaproveitando 100% do pipeline de texto já desenhado, sem exigir visão do
-  provedor — mais robusto mas mais peças móveis (uma lib de OCR a mais).
+- **Confirmado 2026-08-09**: usuário optou pela visão do LLM (opção b),
+  sem OCR tradicional. Primeiro provedor configurado é Ollama local — a
+  qualidade do modelo de visão local (`llava`/`bakllava`) precisa ser
+  validada na prática quando a fatia de ingestão por foto for
+  implementada (planejada só depois da fatia de fatura PDF, primeira
+  fatia vertical do `document-service`); se a qualidade for ruim demais
+  em produção, revisitar com um ADR novo (ex: exigir OpenAI só pra
+  visão, ou reconsiderar OCR).

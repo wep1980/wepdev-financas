@@ -103,8 +103,24 @@ parcela); listar/buscar fatura; pagar fatura (síncrono, idempotente);
 job agendado fecha fatura vencida automaticamente. 82 testes, imagem
 Docker validada. Backlog do serviço completo (ver `docs/tasks.md`).
 
+**`document-service`** faz upload e parsing de fatura de cartão em PDF via
+LLM local (Ollama, ADR-0002) — extrai lançamentos candidatos, usuário
+revisa e confirma (nada vira transação sem confirmação explícita, PRD
+3.2), evento Kafka pro `transaction-service` criar a `Transacao` de
+verdade. Upload é **assíncrono**
+([ADR-0024](docs/architecture/adr/0024-upload-documento-assincrono.md)) —
+extração via LLM local pode levar minutos pra fatura grande, cliente
+sonda o status. Posse da `contaId` (pra saber onde debitar) é confirmada
+uma única vez, no momento da confirmação
+([ADR-0025](docs/architecture/adr/0025-confirmacao-posse-conta-antes-do-evento.md)).
+Testado com faturas reais de três bancos diferentes (Santander, Itaú,
+Nubank — cada um com formato de data e estrutura próprios). Extrato,
+boleto e ingestão por foto (mobile) ficam pra uma fatia futura. 100+
+testes (incluindo um teste de integração que publica evento Kafka real),
+imagem Docker validada. Backlog completo (ver `docs/tasks.md`).
+
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
-(privado). CI 100% verde — `mvn test` passa nos três serviços no runner
+(privado). CI 100% verde — `mvn test` passa nos quatro serviços no runner
 hospedado, cobertura publicada como artefato do run (JaCoCo), a imagem
 Docker é validada a cada mudança (`docker build`, sem publicar em
 registry) e o scan de vulnerabilidade (OWASP Dependency-Check, ADR-0017)
@@ -113,12 +129,13 @@ também passa, com a `NVD_API_KEY` ativa (ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 
 `docker compose up -d --build account-service transaction-service
-card-service` sobe os três serviços + toda a infra (MySQL, Redis,
-MongoDB, Keycloak, Kafka, Prometheus, Grafana) do zero, com autenticação
-de verdade funcionando — validado ponta a ponta (criar conta → registrar
-transação/criar cartão → saldo atualizado, via containers). Pra
-desenvolvimento do dia a dia, mais rápido rodar só a infra via compose e
-os serviços em `mvn quarkus:dev` local (ver README de cada serviço).
+card-service document-service` sobe os quatro serviços + toda a infra
+(MySQL, Redis, MongoDB, Keycloak, Kafka, Ollama, Prometheus, Grafana) do
+zero, com autenticação de verdade funcionando — validado ponta a ponta
+(criar conta → registrar transação/criar cartão/importar fatura → saldo
+atualizado, via containers). Pra desenvolvimento do dia a dia, mais
+rápido rodar só a infra via compose e os serviços em `mvn quarkus:dev`
+local (ver README de cada serviço).
 
 ## Endpoints principais (`account-service`, porta `8081`)
 
@@ -189,6 +206,23 @@ Contrato completo em [`docs/specs/card-service.yaml`](docs/specs/card-service.ya
 Detalhe da chamada síncrona ao `account-service` em
 [`services/card-service/README.md`](services/card-service/README.md).
 
+## Endpoints principais (`document-service`, porta `8084`)
+
+Contrato completo em [`docs/specs/document-service.yaml`](docs/specs/document-service.yaml).
+
+| Método | Path | Role (OIDC) | O que faz |
+|---|---|---|---|
+| `POST` | `/api/v1/documentos` | `usuario` | Upload de fatura em PDF (multipart) — responde **202** na hora (status `RECEBIDO`), extração roda em background |
+| `GET` | `/api/v1/documentos` | `usuario` | Lista documentos do usuário autenticado — filtro opcional `status` |
+| `GET` | `/api/v1/documentos/{id}` | `usuario` | Busca documento com os lançamentos extraídos — é esse que o cliente sonda (polling) até o status sair de `PROCESSANDO` |
+| `POST` | `/api/v1/documentos/{id}/confirmar` | `usuario` | Confirma lançamentos selecionados (`contaId` + ids) — confirma posse da conta, publica evento Kafka, idempotente |
+
+`usuarioId` vem sempre do token. Diferente dos outros serviços, o upload é
+assíncrono (ADR-0024) — a resposta imediata nunca tem os lançamentos, só o
+GET subsequente. Detalhe completo (formatos de fatura suportados,
+integração com `account-service`/`transaction-service`) em
+[`services/document-service/README.md`](services/document-service/README.md).
+
 ## URLs úteis (ambiente de dev local)
 
 Depois de `docker compose up -d` (infra) + `mvn quarkus:dev` em cada
@@ -207,13 +241,17 @@ padrão pra produção, ainda não implantado) em
 | `transaction-service` — Swagger UI | `http://localhost:8082/q/swagger-ui` | — |
 | `card-service` (REST) | `http://localhost:8083` | token OIDC, ver abaixo |
 | `card-service` — Swagger UI | `http://localhost:8083/q/swagger-ui` | — |
+| `document-service` (REST) | `http://localhost:8084` | token OIDC, ver abaixo |
+| `document-service` — Swagger UI | `http://localhost:8084/q/swagger-ui` | — |
 | Keycloak (admin console) | `http://localhost:8080` | `admin` / `admin` |
 | Keycloak (token, realm `financas`) | `http://localhost:8080/realms/financas/protocol/openid-connect/token` | ver `infra/keycloak/realm-financas.json` |
 | Grafana | `http://localhost:3001` | `admin` / `admin` |
 | Kafka UI ([kafka-ui](https://github.com/provectus/kafka-ui) — tópicos, mensagens, config) | `http://localhost:8090` | — |
 | Prometheus | `http://localhost:9090` | — |
-| MySQL (`account_db`/`transaction_db`/`card_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
+| MySQL (`account_db`/`transaction_db`/`card_db`/`document_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
+| MongoDB (`document_service`, ex: via MongoDB Compass) | `localhost:27017` | `financas` / `financas` |
 | Kafka (broker, ex: DBeaver/cliente Kafka) | `localhost:29092` | — |
+| Ollama (LLM local, ADR-0002) | `http://localhost:11500` | — (11500 no host, não 11434 — ver comentário no `docker-compose.yml`) |
 
 Todas as credenciais acima são só de dev, nunca as mesmas em produção (ver
 [`docs/architecture/security.md`](docs/architecture/security.md)). Guia

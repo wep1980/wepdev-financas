@@ -15,4 +15,15 @@ public interface AccountServiceClient {
     void debitar(UUID contaId, BigDecimal valor);
 
     void creditar(UUID contaId, BigDecimal valor);
+
+    /**
+     * Pula a confirmação de posse (não tem token de usuário pra propagar —
+     * usado pelo consumer Kafka de "documento.lancamentos-confirmados",
+     * ADR-0025: a posse já foi confirmada no document-service, síncrono,
+     * antes do evento ser publicado; o consumer confia integralmente
+     * nisso). Só o débito de verdade, via endpoint interno (role service).
+     */
+    void debitarSemConfirmarPosse(UUID contaId, BigDecimal valor);
+
+    void creditarSemConfirmarPosse(UUID contaId, BigDecimal valor);
 }
