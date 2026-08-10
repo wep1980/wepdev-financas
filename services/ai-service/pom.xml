@@ -232,6 +232,11 @@
                     <formats>
                         <format>HTML</format>
                     </formats>
+                    <!-- Falso positivo documentado (não CVE real) — ver
+                         dependency-check-suppression.xml e ADR-0017. -->
+                    <suppressionFiles>
+                        <suppressionFile>dependency-check-suppression.xml</suppressionFile>
+                    </suppressionFiles>
                 </configuration>
             </plugin>
         </plugins>
