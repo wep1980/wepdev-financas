@@ -46,7 +46,7 @@ graph LR
         CardSvc["card-service :8083"]
         DocSvc["document-service :8084"]
         BudgetSvc["budget-service :8085"]
-        AiSvc["ai-service :8086 (planejado)"]
+        AiSvc["ai-service :8086"]
         NotifSvc["notification-service :8087 (planejado)"]
         Kafka[("Kafka")]
     end
@@ -54,7 +54,7 @@ graph LR
     subgraph Dados
         MySQL[("MySQL")]
         Mongo[("MongoDB")]
-        Qdrant[("Qdrant — proposto ADR-0005")]
+        Qdrant[("Qdrant — ADR-0005")]
         Redis[("Redis — cache")]
     end
 
@@ -71,14 +71,15 @@ graph LR
     DocSvc -->|síncrono, confirma posse ADR-0025| AccountSvc
     DocSvc -->|evento| Kafka
     Kafka --> TxSvc
-    TxSvc -->|evento| Kafka
+    TxSvc -->|evento transacao.eventos| Kafka
     BudgetSvc -->|síncrono, ADR-0026| AccountSvc
     BudgetSvc -->|síncrono, ADR-0026| CardSvc
     BudgetSvc -->|síncrono, ADR-0026| TxSvc
-    AiSvc -->|tools MCP| TxSvc
-    AiSvc --> BudgetSvc
-    AiSvc --> AccountSvc
-    AiSvc --> CardSvc
+    AiSvc -->|síncrono, tools de consulta| TxSvc
+    AiSvc -->|síncrono, tools de consulta| BudgetSvc
+    AiSvc -->|síncrono, resolve contaId| AccountSvc
+    AiSvc -->|síncrono, tools de consulta| CardSvc
+    Kafka -->|transacao.eventos, indexação RAG| AiSvc
     NotifSvc -->|polling diário, role=service| TxSvc
     NotifSvc -->|polling diário, role=service| CardSvc
 
@@ -285,6 +286,53 @@ funcionalidades independentes do mesmo serviço (orçamento por categoria/
 mês vs. reserva única pro cálculo de "disponível pra gastar"), que só
 compartilham o serviço, não o cálculo (ADR-0026). Contrato completo em
 `docs/specs/budget-service.yaml`.
+
+### 3.6 `ai-service`
+
+Primeiro serviço 100% MongoDB — sem MySQL. `Mensagem` e `AcaoPendente` são
+value objects **embutidos** dentro do documento `Conversa` (não são
+coleções próprias), diferente do par Mongo+MySQL do `document-service`.
+
+```mermaid
+erDiagram
+    CONVERSA ||--o{ MENSAGEM : contem
+    CONVERSA ||--o| ACAO_PENDENTE : "tem no máximo uma"
+
+    CONVERSA {
+        uuid id
+        uuid usuarioId
+        datetime criadaEm
+        datetime atualizadaEm
+    }
+    MENSAGEM {
+        string autor "USUARIO|AGENTE"
+        string texto
+        datetime enviadaEm
+    }
+    ACAO_PENDENTE {
+        string tipo "ex CRIAR_TRANSACAO"
+        string descricao
+        decimal valor
+        boolean recorrente
+        string frequencia
+        int quantidadeOcorrencias
+        uuid contaId "resolvido via account-service, nunca inventado pelo LLM"
+        string categoria
+        datetime criadaEm
+        datetime expiraEm "criadaEm + 10min, ADR-0007"
+    }
+    CONFIGURACAO_IA {
+        uuid usuarioId "PK — 1 linha por usuário"
+        string provedor "OPENAI|OLLAMA|NENHUM"
+        string apiKey "criptografado em repouso, AES-256/GCM"
+        string ollamaUrl
+    }
+```
+
+`ConfiguracaoIa` não se relaciona com `Conversa` — é config isolada por
+usuário (escolha de provedor de LLM), dona do `ai-service` por não existir
+um `user-service` no sistema. Contrato completo em
+`docs/specs/ai-service.yaml`.
 
 ## 4. Diagrama de classes
 
@@ -774,6 +822,104 @@ Regras que esse diagrama expressa:
   filtram pelo `sub` do token no servidor — só propagação de token, sem
   padrão de dois clientes por integração.
 
+### 4.7 `ai-service` — domínio
+
+```mermaid
+classDiagram
+    class Conversa {
+        -UUID id
+        -UUID usuarioId
+        -List~Mensagem~ mensagens
+        -AcaoPendente acaoPendente
+        +iniciar(usuarioId)$ Conversa
+        +reconstituir(id, usuarioId, ...)$ Conversa
+        +adicionarMensagem(autor, texto) void
+        +proporAcao(acaoPendente) void
+        +confirmarAcaoPendente(agora) AcaoPendente
+        +temAcaoPendenteValida(agora) boolean
+    }
+
+    class Mensagem {
+        <<value object>>
+        -AutorMensagem autor
+        -String texto
+        -Instant enviadaEm
+    }
+
+    class AcaoPendente {
+        <<value object>>
+        -String tipo
+        -String descricao
+        -BigDecimal valor
+        -boolean recorrente
+        -FrequenciaRecorrencia frequencia
+        -Integer quantidadeOcorrencias
+        -UUID contaId
+        -String categoria
+        -Instant criadaEm
+        -Instant expiraEm
+        +expirada(agora) boolean
+    }
+
+    class ConfiguracaoIa {
+        -UUID usuarioId
+        -ProvedorIa provedor
+        -String apiKey
+        -String ollamaUrl
+        +definir(usuarioId, provedor, apiKey, ollamaUrl)$ ConfiguracaoIa
+        +validarProvedor() void
+    }
+
+    class LlmProvider {
+        <<port>>
+        +chat(ChatRequest) String
+        +embed(String) EmbeddingResult
+        +isConfigured() boolean
+    }
+
+    class LlmProviderFactory {
+        <<port>>
+        +criar(ConfiguracaoIa) LlmProvider
+        +criarParaEmbedding() LlmProvider
+    }
+
+    class VectorStore {
+        <<port>>
+        +indexar(RegistroIndexado) void
+        +buscar(usuarioId, vetor, limite) List~ResultadoBusca~
+    }
+
+    class AgenteOrquestradorUseCase {
+        +executar(ChatComando) ChatResultado
+    }
+
+    Conversa "1" *-- "0..*" Mensagem : mensagens
+    Conversa "1" *-- "0..1" AcaoPendente : acaoPendente
+    AgenteOrquestradorUseCase ..> Conversa : usa
+    AgenteOrquestradorUseCase ..> LlmProviderFactory : usa
+    AgenteOrquestradorUseCase ..> VectorStore : usa (RAG)
+    LlmProviderFactory ..> ConfiguracaoIa : lê
+
+    note for AcaoPendente "Expira 10min após criadaEm (ADR-0007, hardcoded).\ncontaId nunca é preenchido pelo LLM — sempre\nresolvido em Java via AccountServiceClient contra o\ntexto da conta mencionada pelo usuário."
+    note for LlmProviderFactory "Único ponto do sistema que instancia adapter\ndiretamente (new), não bean CDI — o provedor é\nescolhido em runtime por usuário (ConfiguracaoIa),\nnão fixo por deployment. criarParaEmbedding() sempre\nresolve Ollama, mesmo se o usuário usa OpenAI pro\nchat — dimensão do vetor no Qdrant é fixa."
+    note for AgenteOrquestradorUseCase "Único caso de uso pra todo POST /chat — decide\nCONSULTA vs AÇÃO vs correção vs confirmação a partir\ndo texto + estado da Conversa. Confirmação é\ncasamento de palavra-chave (\"sim\", \"confirmo\", ...),\nnão uma segunda chamada ao LLM. Resposta final de\nconsulta é sempre montada por template Java, nunca\npelo texto livre do LLM."
+```
+
+Regras que esse diagrama expressa:
+
+- **`Mensagem` e `AcaoPendente` são embutidos, não agregados próprios.**
+  Natural pela `Conversa` já viver 100% em MongoDB (documento único) —
+  diferente do `document-service`, que mistura Mongo (documento bruto) e
+  MySQL (lançamentos).
+- **`contaId` nunca é extraído pelo LLM.** O `AgenteOrquestradorUseCase`
+  sempre resolve de forma determinística via `AccountServiceClient`; se
+  não conseguir casar o texto com nenhuma conta ativa, responde pedindo
+  esclarecimento em vez de propor a ação com um id inventado.
+- **`LlmProviderFactory` é a única exceção ao padrão de bean CDI singleton
+  do resto do projeto** — o provedor de LLM é uma escolha por usuário
+  (`ConfiguracaoIa`), resolvida a cada chamada, não uma única implementação
+  fixa por ambiente.
+
 ## 5. Implantação (produção)
 
 ```mermaid
@@ -829,6 +975,7 @@ nome real de domínio/host aparece aqui de propósito.
 Ficam embutidos perto do texto que os explica, não duplicados aqui:
 
 - Ingestão de documento → transação — `overview.md` seção 3.
-- Comando em linguagem natural (consulta e ação) — `overview.md` seção 4,
-  `ai-strategy.md` seções 5 e 6.
+- Comando em linguagem natural (consulta, ação e indexação para RAG) —
+  `overview.md` seção 4, `ai-strategy.md` seções 5 e 6.
 - Alerta de vencimento — `overview.md` seção 5.
+- "Disponível pra gastar" (`budget-service`) — `overview.md` seção 6.

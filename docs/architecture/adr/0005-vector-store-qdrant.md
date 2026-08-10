@@ -1,6 +1,6 @@
 # ADR-0005: Qdrant como vector store para RAG
 
-Status: Proposta (não confirmada pelo usuário — decisão minha, revisar)
+Status: Aceita (confirmada pelo usuário em 2026-08-10, início da fatia 5)
 Data: 2026-08-06
 
 ## Contexto
@@ -30,6 +30,3 @@ a embeddings. Alternativas consideradas:
 - Mais um serviço no `docker-compose.yml` (mais um container em dev).
 - Precisa de um cliente Qdrant no `ai-service` (Java) — verificar maturidade
   do client oficial/comunidade pra Java/Quarkus antes de implementar.
-- **Ação pendente**: confirmar essa escolha com o usuário antes de
-  implementar o `ai-service` (fatia correspondente no roadmap) — está listada
-  como proposta, não decisão fechada.

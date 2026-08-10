@@ -36,10 +36,10 @@ por IA (specs, ADRs, roadmap e tasks como fonte da verdade — ver abaixo).
 - **Ingress (produção)**: Cloudflare Tunnel, sem porta pública aberta ([ADR-0019](docs/architecture/adr/0019-ingress-cloudflare-tunnel.md))
 - **CI/CD**: GitHub Actions — CI em runner hospedado, deploy via runner
   self-hosted no próprio servidor ([ADR-0020](docs/architecture/adr/0020-deploy-runner-self-hosted.md))
-- **IA**: agentes, RAG e MCP (Model Context Protocol) para interação em
-  linguagem natural com o sistema; provedor de LLM plugável (OpenAI ou Ollama,
-  ver [ADR-0002](docs/architecture/adr/0002-abstracao-provedor-llm.md));
-  Qdrant como vector store (proposto, [ADR-0005](docs/architecture/adr/0005-vector-store-qdrant.md))
+- **IA**: agente orquestrador + RAG para interação em linguagem natural com
+  o sistema (`ai-service`); provedor de LLM plugável por usuário (OpenAI ou
+  Ollama, ver [ADR-0002](docs/architecture/adr/0002-abstracao-provedor-llm.md));
+  Qdrant como vector store ([ADR-0005](docs/architecture/adr/0005-vector-store-qdrant.md))
 
 ## Arquitetura
 
@@ -67,7 +67,10 @@ wepdev-financas/
 └── services/
     ├── account-service/        # Quarkus — contas financeiras (ver seção Endpoints abaixo)
     ├── transaction-service/    # Quarkus — transações, chama account-service síncrono
-    └── card-service/           # Quarkus — cartões, fatura e parcelamento
+    ├── card-service/           # Quarkus — cartões, fatura e parcelamento
+    ├── document-service/       # Quarkus — upload/parsing de fatura via LLM local
+    ├── budget-service/         # Quarkus — orçamento e "disponível pra gastar"
+    └── ai-service/             # Quarkus — chat com IA, RAG, ação por comando
 ```
 
 ### Estado atual
@@ -131,8 +134,22 @@ faturas, despesas recorrentes), não só o total — dá pra auditar de onde
 veio o número. 49 testes, imagem Docker validada. Backlog completo (ver
 `docs/tasks.md`).
 
+**`ai-service`** é o chat com IA (PRD 3.4/3.5) — um único endpoint
+(`POST /chat`) atende pergunta nova, ação, correção e confirmação; o
+agente orquestrador decide a intenção a partir do texto + estado da
+conversa. Consulta cruza `budget-service` (números exatos) e busca
+semântica via RAG (Qdrant, indexado automaticamente a cada
+`transacao.eventos` publicado pelo `transaction-service`); ação (ex:
+criar despesa) sempre propõe antes de persistir, com confirmação
+explícita e expiração em 10 minutos (ADR-0007) — `contaId` nunca é
+extraído pelo LLM, sempre resolvido de forma determinística contra o
+`account-service`. Primeiro serviço sem MySQL (só MongoDB + Qdrant);
+provedor de LLM (OpenAI ou Ollama) é configurável por usuário, `apiKey`
+criptografada em repouso (AES-256/GCM). 64 testes, imagem Docker
+validada. Backlog completo (ver `docs/tasks.md`).
+
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
-(privado). CI 100% verde — `mvn test` passa nos cinco serviços no runner
+(privado). CI 100% verde — `mvn test` passa nos seis serviços no runner
 hospedado, cobertura publicada como artefato do run (JaCoCo), a imagem
 Docker é validada a cada mudança (`docker build`, sem publicar em
 registry) e o scan de vulnerabilidade (OWASP Dependency-Check, ADR-0017)
@@ -141,13 +158,14 @@ também passa, com a `NVD_API_KEY` ativa (ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 
 `docker compose up -d --build account-service transaction-service
-card-service document-service budget-service` sobe os cinco serviços +
-toda a infra (MySQL, Redis, MongoDB, Keycloak, Kafka, Ollama, Prometheus,
-Grafana) do zero, com autenticação de verdade funcionando — validado
-ponta a ponta (criar conta → registrar transação/criar cartão/importar
-fatura → saldo atualizado, via containers). Pra desenvolvimento do dia a
-dia, mais rápido rodar só a infra via compose e os serviços em
-`mvn quarkus:dev` local (ver README de cada serviço).
+card-service document-service budget-service ai-service` sobe os seis
+serviços + toda a infra (MySQL, Redis, MongoDB, Qdrant, Keycloak, Kafka,
+Ollama, Prometheus, Grafana) do zero, com autenticação de verdade
+funcionando — validado ponta a ponta (criar conta → registrar transação/
+criar cartão/importar fatura/conversar com a IA → saldo atualizado, via
+containers). Pra desenvolvimento do dia a dia, mais rápido rodar só a
+infra via compose e os serviços em `mvn quarkus:dev` local (ver README de
+cada serviço).
 
 ## Endpoints principais (`account-service`, porta `8081`)
 
@@ -255,6 +273,24 @@ nenhum endpoint interno (`role: service`) é usado aqui, diferente de
 `card-service`/`transaction-service`. Detalhe completo em
 [`services/budget-service/README.md`](services/budget-service/README.md).
 
+## Endpoints principais (`ai-service`, porta `8086`)
+
+Contrato completo em [`docs/specs/ai-service.yaml`](docs/specs/ai-service.yaml).
+
+| Método | Path | Role (OIDC) | O que faz |
+|---|---|---|---|
+| `POST` | `/api/v1/chat` | `usuario` | Endpoint único do chat — pergunta, ação, correção ou confirmação, decidido pelo agente a partir do texto + estado da conversa; `conversaId` omitido inicia conversa nova |
+| `GET` | `/api/v1/conversas` | `usuario` | Lista conversas do usuário autenticado, mais recente primeiro (só resumo) |
+| `GET` | `/api/v1/conversas/{id}` | `usuario` | Busca conversa com histórico completo de mensagens; 404 se não for sua |
+| `GET` | `/api/v1/configuracao` | `usuario` | Busca configuração de IA do usuário (nunca 404; `apiKey` nunca volta na resposta) |
+| `PUT` | `/api/v1/configuracao` | `usuario` | Define provedor de LLM (`OPENAI` com `apiKey`, ou `OLLAMA`); 400 se `apiKey` ausente com `OPENAI` |
+
+`usuarioId` vem sempre do token. Ação (ex: criar transação) nunca é
+persistida na mesma chamada que a propõe — exige confirmação explícita do
+usuário (ADR-0007), e `contaId` é sempre resolvido de forma determinística
+contra o `account-service`, nunca extraído pelo LLM. Detalhe completo em
+[`services/ai-service/README.md`](services/ai-service/README.md).
+
 ## URLs úteis (ambiente de dev local)
 
 Depois de `docker compose up -d` (infra) + `mvn quarkus:dev` em cada
@@ -277,15 +313,19 @@ padrão pra produção, ainda não implantado) em
 | `document-service` — Swagger UI | `http://localhost:8084/q/swagger-ui` | — |
 | `budget-service` (REST) | `http://localhost:8085` | token OIDC, ver abaixo |
 | `budget-service` — Swagger UI | `http://localhost:8085/q/swagger-ui` | — |
+| `ai-service` (REST) | `http://localhost:8086` | token OIDC, ver abaixo |
+| `ai-service` — Swagger UI | `http://localhost:8086/q/swagger-ui` | — |
 | Keycloak (admin console) | `http://localhost:8080` | `admin` / `admin` |
 | Keycloak (token, realm `financas`) | `http://localhost:8080/realms/financas/protocol/openid-connect/token` | ver `infra/keycloak/realm-financas.json` |
 | Grafana | `http://localhost:3001` | `admin` / `admin` |
 | Kafka UI ([kafka-ui](https://github.com/provectus/kafka-ui) — tópicos, mensagens, config) | `http://localhost:8090` | — |
 | Prometheus | `http://localhost:9090` | — |
 | MySQL (`account_db`/`transaction_db`/`card_db`/`document_db`/`budget_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
-| MongoDB (`document_service`, ex: via MongoDB Compass) | `localhost:27017` | `financas` / `financas` |
+| MongoDB (`document_service` + `ai-service`, ex: via MongoDB Compass) | `localhost:27017` | `financas` / `financas` |
 | Kafka (broker, ex: DBeaver/cliente Kafka) | `localhost:29092` | — |
 | Ollama (LLM local, ADR-0002) | `http://localhost:11500` | — (11500 no host, não 11434 — ver comentário no `docker-compose.yml`) |
+| Qdrant (vetores, ADR-0005) — dashboard web | `http://localhost:6333/dashboard` | — |
+| Qdrant — REST/gRPC | `http://localhost:6333` / `localhost:6334` | — |
 
 Todas as credenciais acima são só de dev, nunca as mesmas em produção (ver
 [`docs/architecture/security.md`](docs/architecture/security.md)). Guia

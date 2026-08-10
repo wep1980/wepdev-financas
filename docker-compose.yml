@@ -12,6 +12,7 @@ volumes:
   mongo-data:
   keycloak-data:
   ollama-data:
+  qdrant-data:
 
 services:
 
@@ -56,6 +57,19 @@ services:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+    networks: [financas-net]
+
+  # Vector store pro RAG do ai-service (ADR-0005, confirmado 2026-08-10) —
+  # embeddings de descrição de transação/lançamento pra busca semântica.
+  # 6333 = REST/HTTP (dashboard em /dashboard), 6334 = gRPC (cliente Java).
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: financas-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
     networks: [financas-net]
 
   # Provedor de LLM local (ADR-0002/ADR-0015) — sem custo por chamada, dado
@@ -271,4 +285,38 @@ services:
       OTEL_ENDPOINT: http://otel-collector:4317
     ports:
       - "8085:8085"
+    networks: [financas-net]
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: src/main/docker/Dockerfile.jvm
+    container_name: financas-ai-service
+    depends_on:
+      mongo: { condition: service_started }
+      qdrant: { condition: service_started }
+      kafka: { condition: service_started }
+      ollama: { condition: service_started }
+      account-service: { condition: service_started }
+      budget-service: { condition: service_started }
+      card-service: { condition: service_started }
+      transaction-service: { condition: service_started }
+    environment:
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-financas}:${MONGO_ROOT_PASSWORD:-financas}@mongo:27017
+      QDRANT_URL: http://qdrant:6333
+      KAFKA_BOOTSTRAP: kafka:9092
+      KEYCLOAK_URL: http://keycloak:8080
+      ACCOUNT_SERVICE_URL: http://account-service:8081
+      BUDGET_SERVICE_URL: http://budget-service:8085
+      CARD_SERVICE_URL: http://card-service:8083
+      TRANSACTION_SERVICE_URL: http://transaction-service:8082
+      # OLLAMA_BASE_URL não precisa ser setado — application.properties já
+      # tem default "http://ollama:11434" (mesmo motivo do document-service,
+      # ver comentário no serviço ollama acima sobre a porta 11500 ser só
+      # pro acesso pelo host). AI_SERVICE_CRIPTOGRAFIA_CHAVE também não —
+      # default de dev já embutido no application.properties, produção usa
+      # Vault (docs/architecture/security.md).
+      OTEL_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8086:8086"
     networks: [financas-net]

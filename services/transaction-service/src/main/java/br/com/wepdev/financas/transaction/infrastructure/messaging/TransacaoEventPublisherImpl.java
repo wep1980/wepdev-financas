@@ -18,6 +18,8 @@ public class TransacaoEventPublisherImpl implements TransacaoEventPublisher {
                 transacao.getId(),
                 transacao.getContaId(),
                 transacao.getUsuarioId(),
+                transacao.getDescricao(),
+                transacao.getCategoria(),
                 transacao.getTipo().name(),
                 transacao.getValor(),
                 transacao.getCriadoEm()

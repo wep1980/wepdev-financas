@@ -20,7 +20,7 @@ microsserviços em vez de monólito nesse projeto.
 | `card-service` | Cartões de crédito, faturas, parcelamento — independente de `TipoConta.CARTAO_CREDITO` (ADR-0022) | 8083 | MySQL (`card_db`) | ✅ Entregue — CRUD de cartão + fatura/parcelamento/pagamento, 82 testes, CI verde |
 | `document-service` | Upload e parsing de fatura de cartão (PDF) via LLM local (Ollama, ADR-0002); extrato (PDF/CSV) e boleto de financiamento (ADR-0014) ficam pra fatias seguintes; no mobile, foto entra também depois (ADR-0015); gera lançamentos pendentes, usuário confirma, evento Kafka vira transação de verdade (ADR-0023) | 8084 | MongoDB (documento bruto + resultado do parsing) + MySQL (lançamentos pendentes) | ✅ Entregue (fatura PDF) — upload assíncrono + extração LLM + confirmação + evento, 100+ testes, CI verde |
 | `budget-service` | Orçamento por categoria/mês, cálculo de "disponível pra gastar" — cruza account-service/card-service/transaction-service de forma síncrona (ADR-0026) | 8085 | MySQL (`budget_db`) | ✅ Entregue — orçamento + disponível pra gastar, 49 testes, CI verde |
-| `ai-service` | Orquestração de agentes, RAG, chat em linguagem natural, MCP tools | 8086 | Qdrant (vetores, proposto ADR-0005) + MongoDB (histórico de conversas) | Planejado |
+| `ai-service` | Orquestração de agentes, RAG, chat em linguagem natural, ação por comando (criar transação) — cruza account/budget/card/transaction-service de forma síncrona | 8086 | Qdrant (vetores, ADR-0005) + MongoDB (conversas + configuração de IA), primeiro serviço sem MySQL | ✅ Entregue — chat (consulta + ação com confirmação), RAG via evento Kafka, 64 testes, CI verde |
 | `notification-service` | Alertas de vencimento (despesa recorrente, fatura de cartão) via push/WhatsApp/e-mail; preferências de notificação por usuário | 8087 | MongoDB | Planejado |
 
 Cada serviço tem seu contrato em `docs/specs/<nome-do-servico>.yaml`, escrito
@@ -88,39 +88,72 @@ débito/crédito síncrono) é idêntico.
 
 ## 4. Fluxo: comando em linguagem natural (`ai-service`)
 
-Ver `docs/architecture/ai-strategy.md` para o detalhe completo. Dois tipos de
-intent, tratados de forma bem diferente:
+Ver `docs/architecture/ai-strategy.md` para o detalhe completo. Um único
+endpoint (`POST /api/v1/chat`) atende pergunta nova, comando de ação,
+correção e confirmação — o `AgenteOrquestradorUseCase` decide a intenção a
+partir do texto + estado da conversa (`Conversa`, MongoDB, com `Mensagem` e
+`AcaoPendente` embutidos). Diferente do `document-service`, não existe
+endpoint `/confirmar` separado — a confirmação é conversacional
+("sim"/"confirmo"/"pode criar"/…, casamento de palavra-chave, não uma
+segunda chamada ao LLM).
 
 ### 4.1 Consulta (só leitura)
 
-`ai-service` recebe a pergunta, decide (via agente orquestrador) quais dados
-precisa buscar (RAG sobre transações/faturas + chamada direta ao
-`budget-service` para números exatos), monta contexto, chama o LLM
-configurado (OpenAI ou Ollama) e retorna resposta rastreável.
+O LLM classifica a intenção e a tool (`CONSULTA` + `buscar_saldo_disponivel`
+/`resumo_categoria`/`buscar_transacoes_similares`/…), o `ai-service` chama o
+serviço correspondente (`budget-service` para números exatos,
+`VectorStore`/Qdrant para busca semântica sobre transações via RAG) e monta
+a resposta final **sempre por template Java**, nunca pelo texto livre do
+LLM — os números exatos vêm da chamada determinística, o LLM só ajuda a
+entender a pergunta.
 
-### 4.2 Ação (cria/altera dado)
-
-Exemplo: *"criar uma despesa recorrente de 24 meses no valor de R$19.990"*.
+### 4.2 Ação (cria transação)
 
 ```mermaid
 sequenceDiagram
     participant U as Usuário (mobile texto/voz* ou web texto)
     participant AI as ai-service
+    participant A as account-service
     participant T as transaction-service
 
-    U->>AI: comando em linguagem natural
-    AI->>AI: extrai parâmetros estruturados (agente orquestrador)
-    AI-->>U: resumo da ação proposta (nada persistido ainda)
-    U->>AI: confirma (ou corrige e recebe novo resumo)
-    AI->>T: cria TransacaoRecorrente / Transacao
+    U->>AI: POST /chat "lança uma despesa de 50 em Mercado hoje"
+    AI->>AI: classifica intenção + extrai campos (LLM, JSON)
+    AI->>A: resolve "conta corrente" -> contaId real (nunca inventado pelo LLM)
+    AI-->>U: tipo=PROPOSTA_ACAO (resumo, nada persistido, expira em 10min)
+    U->>AI: POST /chat "sim" (mesma conversaId)
+    AI->>T: cria Transacao / TransacaoRecorrente
     T-->>AI: confirmação
-    AI-->>U: resumo do que foi criado
+    AI-->>U: tipo=RESPOSTA, resumo do que foi criado
 ```
 *voz é transcrita no próprio dispositivo antes de chegar aqui — ver ADR-0008.
 
 Mesmo princípio de confirmação explícita usado no fluxo de documento (seção
 3) — nenhuma mutação de dado financeiro acontece sem o usuário confirmar
-vendo exatamente o que vai ser criado. Ver ADR-0007.
+vendo exatamente o que vai ser criado. Ver ADR-0007. `contaId` nunca é
+extraído/inventado pelo LLM — é sempre resolvido de forma determinística no
+`ai-service` via `account-service`; se não resolver, o agente pergunta qual
+conta usar em vez de propor uma ação.
+
+### 4.3 Indexação para RAG
+
+```mermaid
+sequenceDiagram
+    participant T as transaction-service
+    participant K as Kafka (transacao.eventos)
+    participant AI as ai-service
+    participant O as Ollama (embedding)
+    participant Q as Qdrant
+
+    T->>K: publica TransacaoRegistradaEvento (inclui descricao/categoria)
+    K->>AI: TransacaoRegistradaConsumer consome
+    AI->>O: gera embedding do texto da transação
+    AI->>Q: upsert do vetor, filtrado por usuarioId
+```
+
+Embedding de indexação **sempre** usa Ollama, mesmo que o usuário tenha
+escolhido OpenAI como provedor de chat — modelos de embedding diferentes
+geram vetores de dimensão diferente e a coleção do Qdrant tem dimensão
+fixa (768, `nomic-embed-text`). Ver `ai-strategy.md`.
 
 ## 5. Fluxo: alerta de vencimento
 

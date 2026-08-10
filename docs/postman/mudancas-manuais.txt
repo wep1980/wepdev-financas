@@ -1,5 +1,5 @@
 MUDANÇAS MANUAIS NO POSTMAN — account-service, transaction-service,
-card-service, document-service e budget-service
+card-service, document-service, budget-service e ai-service
 ==================================================================================
 
 Este arquivo existe porque a collection do Postman NÃO é reimportada a
@@ -525,3 +525,102 @@ GET /api/v1/disponivel-para-gastar?mes=2026-08 — cálculo do PRD 3.3
   - Resposta: 200 com os totais E o detalhamento item a item (campo
     "detalhamento": contas/faturas/despesasRecorrentes) — dá pra conferir
     de onde veio cada número / 400 (mes ausente ou fora do formato).
+
+
+------------------------------------------------------------
+2026-08-10 — ai-service: serviço novo (fatia 5, chat com IA + RAG)
+------------------------------------------------------------
+
+Serviço novo, porta 8086. Se ainda não tem uma collection pra ele, importe
+de http://localhost:8086/q/openapi (com o serviço rodando) — é a primeira
+vez, então reimportar não perde nada. Depois disso, siga este arquivo pra
+mudanças futuras, mesmo esquema dos outros serviços.
+
+Variável de environment nova: ai_service_url = http://localhost:8086
+
+Diferente dos outros serviços, ai-service NÃO usa MySQL — só MongoDB
+(conversas/configuração) e Qdrant (vetores pra RAG). Pra funcionar de
+verdade (não só responder RESPOSTA de erro) o usuário precisa antes:
+  1. Ter pelo menos um provedor de LLM configurado via PUT /configuracao
+     abaixo (Ollama funciona sem apiKey, já que roda local).
+  2. Ter alguma transação registrada no transaction-service — o
+     ai-service indexa automaticamente via evento Kafka
+     "transacao.eventos" (RAG), não precisa reindexar manualmente.
+  3. Ter conta(s)/orçamento(s)/cartão(ões) reais no account-service/
+     budget-service/card-service se a pergunta depender deles (ex:
+     "quanto tenho disponível pra gastar").
+
+GET /api/v1/configuracao — buscar configuração de IA do usuário
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Nunca 404 — usuário que nunca configurou recebe
+    provedor="NENHUM". apiKey NUNCA volta na resposta (fica só
+    criptografado no banco, ver CriptografiaService) — resposta traz só
+    um booleano "configurado".
+  - Resposta: 200.
+
+PUT /api/v1/configuracao — definir provedor de LLM
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Header: Content-Type: application/json
+  - Body (raw JSON) — exemplo com Ollama (local, sem custo):
+    {
+      "provedor": "OLLAMA",
+      "ollamaUrl": "http://ollama:11434"
+    }
+    Body (raw JSON) — exemplo com OpenAI:
+    {
+      "provedor": "OPENAI",
+      "apiKey": "sk-..."
+    }
+    (provedor obrigatório, enum OPENAI/OLLAMA/NENHUM; apiKey obrigatória
+    só se provedor=OPENAI — validação cruzada, dá 400 se faltar)
+  - Resposta: 200 / 400 (provedor ausente/inválido, ou apiKey ausente com
+    provedor OPENAI).
+
+POST /api/v1/chat — conversar com o agente de IA
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Header: Content-Type: application/json
+  - Body (raw JSON):
+    {
+      "conversaId": null,
+      "mensagem": "quanto eu gastei em Alimentação esse mês?"
+    }
+    (conversaId omitido/null = inicia uma conversa nova, resposta traz o
+    conversaId gerado; enviar o mesmo conversaId nas próximas mensagens
+    mantém o histórico e o contexto de uma AcaoPendente, se houver)
+  - Endpoint único pra tudo (pergunta nova, comando de ação, correção,
+    confirmação) — o agente decide a intenção pelo texto + estado da
+    conversa, não tem endpoint separado de "confirmar" (diferente do
+    document-service).
+  - Exemplos de mensagem pra testar cada fluxo:
+    consulta:  "quanto tenho disponível pra gastar esse mês?"
+    ação:      "lança uma despesa de 50 reais em Mercado hoje"
+               (resposta vem com tipo=PROPOSTA_ACAO e o campo
+               acaoProposta preenchido — nada é criado ainda)
+    confirmar: "sim" / "confirmo" / "pode criar" (na mesma conversaId
+               logo depois da proposta acima — cria a transação de
+               verdade, chamando o transaction-service)
+    corrigir:  enviar uma nova instrução antes de confirmar (ex: "na
+               verdade foi 60 reais") — descarta a proposta anterior e
+               classifica do zero, não faz merge incremental
+  - Resposta: 200, sempre. Campo "tipo": RESPOSTA (só texto, ex:
+    resultado de consulta ou pedido de esclarecimento) ou PROPOSTA_ACAO
+    (aguardando confirmação, expira em 10 minutos). Campo "trace" lista
+    as tools/serviços consultados por trás (útil pra debug, não é erro).
+  - Não tem 400/404 "de negócio" — mensagem mal-entendida vira uma
+    resposta conversacional pedindo esclarecimento, não erro HTTP.
+
+GET /api/v1/conversas — listar conversas do usuário
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body, sem query params. Resposta: 200, lista mais recente
+    primeiro, sem as mensagens (só resumo).
+
+GET /api/v1/conversas/{id} — buscar conversa com histórico completo
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Resposta: 200 (inclui todas as mensagens e a AcaoPendente atual, se
+    houver) / 404 (não existe ou não é sua).
+
+Importante pra testar o fluxo de ação de ponta a ponta: account-service,
+transaction-service, budget-service e card-service precisam estar
+rodando (o agente resolve "conta corrente" etc. pro contaId de verdade
+via account-service antes de propor a ação) — mesmo motivo dos outros
+serviços que fazem chamada síncrona.
