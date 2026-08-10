@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+   <suppress>
+      <notes><![CDATA[
+         Falso positivo (ADR-0017/security.md seção 6) — mesmo achado do
+         document-service (ver dependency-check-suppression.xml de lá e
+         docs/historico.md 2026-08-10): o OWASP Dependency-Check
+         identifica os artefatos "quarkus-mongodb-panache" (dependência
+         direta, ODM MongoDB do Quarkus) e "quarkus-mongodb-client"
+         (dependência transitiva dele) como se fossem o produto "MongoDB
+         Server" (cpe:2.3:a:mongodb:mongodb:*), porque a versão do
+         artefato (ex: 3.38.1, versão do Quarkus) coincide numericamente
+         com uma faixa de versão do MongoDB Server. Não existe MongoDB
+         Server 3.38.1 — o CPE está simplesmente errado pra esses
+         artefatos, que são só cliente/ODM, nunca o banco em si.
+         Suprimido por CVE exato (não por <cpe>) porque os artefatos
+         também casam com o CPE correto "quarkus:quarkus", e o
+         dependency-check exige que TODOS os CPEs de uma dependência
+         batam pra uma regra <cpe> suprimir. Regex "quarkus-mongodb-.*"
+         cobre os dois artefatos de uma vez.
+         Revisar em 2027-02-10 (6 meses) ou quando o Dependency-Check
+         corrigir esse mapeamento de CPE — o que vier primeiro.
+      ]]></notes>
+      <packageUrl regex="true">^pkg:maven/io\.quarkus/quarkus\-mongodb\-.*@.*$</packageUrl>
+      <cve>CVE-2021-32036</cve>
+      <cve>CVE-2025-14847</cve>
+      <cve>CVE-2026-9753</cve>
+      <cve>CVE-2014-8180</cve>
+   </suppress>
+</suppressions>
