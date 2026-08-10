@@ -45,7 +45,7 @@ graph LR
         TxSvc["transaction-service :8082"]
         CardSvc["card-service :8083"]
         DocSvc["document-service :8084"]
-        BudgetSvc["budget-service :8085 (planejado)"]
+        BudgetSvc["budget-service :8085"]
         AiSvc["ai-service :8086 (planejado)"]
         NotifSvc["notification-service :8087 (planejado)"]
         Kafka[("Kafka")]
@@ -72,6 +72,9 @@ graph LR
     DocSvc -->|evento| Kafka
     Kafka --> TxSvc
     TxSvc -->|evento| Kafka
+    BudgetSvc -->|síncrono, ADR-0026| AccountSvc
+    BudgetSvc -->|síncrono, ADR-0026| CardSvc
+    BudgetSvc -->|síncrono, ADR-0026| TxSvc
     AiSvc -->|tools MCP| TxSvc
     AiSvc --> BudgetSvc
     AiSvc --> AccountSvc
@@ -251,11 +254,37 @@ classe dedicado (seção 4) — o domínio é enxuto o bastante (`DocumentoImpor
 `LancamentoPendente`, ver `services/document-service/.../domain`) pra esse
 ER conceitual já cobrir o essencial sem repetição.
 
-### 3.5 Pendente
+### 3.5 `budget-service`
 
-`budget-service` ainda não tem contrato OpenAPI (roadmap #4) — modelo de
-domínio dele entra aqui quando a spec for escrita (spec-driven, ver
-`CLAUDE.md`), não antes.
+Banco separado (`budget_db`, ADR-0001) — sem FK real com os outros três
+serviços que consulta (account-service/card-service/transaction-service,
+ADR-0026), só leitura síncrona propagando o token do usuário.
+`valorConsumido`/`valorDisponivel` (que aparecem na resposta da API) não
+são campos persistidos — calculados na hora, nunca guardados.
+
+```mermaid
+erDiagram
+    ORCAMENTO {
+        uuid id
+        uuid usuarioId
+        string categoria
+        string mesReferencia "AAAA-MM"
+        decimal valorLimite
+        string status "ATIVO|CANCELADO"
+        datetime criadoEm
+    }
+    RESERVA {
+        uuid usuarioId "PK — 1 linha por usuário, sempre upsert"
+        decimal valor
+        datetime atualizadoEm
+    }
+```
+
+Sem relacionamento entre `ORCAMENTO` e `RESERVA` — são duas
+funcionalidades independentes do mesmo serviço (orçamento por categoria/
+mês vs. reserva única pro cálculo de "disponível pra gastar"), que só
+compartilham o serviço, não o cálculo (ADR-0026). Contrato completo em
+`docs/specs/budget-service.yaml`.
 
 ## 4. Diagrama de classes
 
@@ -659,6 +688,91 @@ Regras que esse diagrama expressa:
 - **`GET /faturas/proximos-vencimentos` (role `service`) só considera
   `FECHADA`** — uma fatura `PAGA` não é mais um vencimento pendente,
   `ABERTA` ainda não tem valor definitivo pra alertar o usuário.
+
+### 4.6 `budget-service` — domínio
+
+```mermaid
+classDiagram
+    class Orcamento {
+        -UUID id
+        -UUID usuarioId
+        -String categoria
+        -YearMonth mesReferencia
+        -BigDecimal valorLimite
+        -StatusOrcamento status
+        -Instant criadoEm
+        +criar(usuarioId, categoria, mesReferencia, valorLimite)$ Orcamento
+        +reconstituir(id, usuarioId, ...)$ Orcamento
+        +atualizarLimite(novoValorLimite) void
+        +cancelar() void
+        +isAtivo() boolean
+    }
+
+    class StatusOrcamento {
+        <<enumeration>>
+        ATIVO
+        CANCELADO
+    }
+
+    class Reserva {
+        -UUID usuarioId
+        -BigDecimal valor
+        -Instant atualizadoEm
+        +definir(usuarioId, valor)$ Reserva
+        +reconstituir(usuarioId, valor, atualizadoEm)$ Reserva
+        +semDefinir(usuarioId)$ Reserva
+        +atualizar(novoValor) void
+    }
+
+    class AccountServiceClient {
+        <<port>>
+        +buscarContasAtivas() List~Conta~
+    }
+
+    class CardServiceClient {
+        <<port>>
+        +buscarFaturasFechadas() List~FaturaFechada~
+    }
+
+    class TransactionServiceClient {
+        <<port>>
+        +buscarDespesasRecorrentesAtivas() List~DespesaRecorrente~
+        +buscarResumoPorCategoria(inicio, fim) List~ResumoCategoria~
+    }
+
+    class OrcamentoJaExisteException {
+        <<exception>>
+        +OrcamentoJaExisteException(categoria, mesReferencia)
+    }
+
+    class OrcamentoNaoEncontradoException {
+        <<exception>>
+        +OrcamentoNaoEncontradoException(id)
+    }
+
+    Orcamento "1" *-- "1" StatusOrcamento : status
+
+    note for Orcamento "categoria + mesReferencia não são únicos por\nconstraint de banco — duplicata (mesma dupla ainda\nATIVO) é rejeitada em código pelo caso de uso de\ncriação (OrcamentoRepository.existeAtivo), pra\npermitir cancelar e recriar no futuro sem bloqueio\npermanente. valorConsumido/valorDisponivel NÃO são\ncampos do domínio — calculados na hora pelo caso de\nuso, consultando transaction-service (ADR-0026)."
+    note for Reserva "Não é um aggregate tradicional — 1 linha por\nusuário (usuarioId é a própria PK), sempre upsert,\nsem histórico. semDefinir() modela o estado \"nunca\nconfigurou\" (valor 0), usado quando o repositório\nnão acha nada — GET /reserva nunca é 404."
+    note for AccountServiceClient "Três portas de saída (ADR-0026), todas propagando\no token do PRÓPRIO usuário (PropagarAutorizacaoHeadersFactory\ncompartilhado) — nenhuma confirma posse de um id\nespecífico, os endpoints já filtram pelo sub do\ntoken. Filtro por mês (dataVencimento/dataInicio)\nacontece em CalcularDisponivelParaGastarUseCase, não\naqui — os clientes devolvem dado bruto."
+```
+
+Regras que esse diagrama expressa:
+
+- **Duplicata é responsabilidade do caso de uso, não do banco.**
+  `OrcamentoRepository.existeAtivo` é checado por `CriarOrcamentoUseCase`
+  antes de persistir — não existe `UNIQUE` em (usuarioId, categoria,
+  mesReferencia) na tabela, porque cancelar um orçamento e criar outro
+  pra mesma categoria/mês no futuro é fluxo válido.
+- **`valorConsumido`/`valorDisponivel`/`percentualConsumido` nunca são
+  persistidos.** Ficam de fora do domínio de propósito — calculados a
+  cada leitura (`OrcamentoDetalhe`, camada `application`), nunca correm o
+  risco de ficar desatualizados.
+- **Três clientes, zero confirmação de posse.** Diferente de
+  card-service/document-service (que confirmam posse de um id específico
+  antes de agir), os cinco endpoints que `budget-service` chama já
+  filtram pelo `sub` do token no servidor — só propagação de token, sem
+  padrão de dois clientes por integração.
 
 ## 5. Implantação (produção)
 

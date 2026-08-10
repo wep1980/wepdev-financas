@@ -67,7 +67,7 @@ listado aqui só como checklist de referência:
 - Nenhuma mutação de dado automática (parsing de documento, comando de IA)
   acontece sem confirmação explícita do usuário (ADR-0004, ADR-0007).
 - Débito/crédito de saldo é síncrono com retry/timeout, nunca "otimista"
-  (`overview.md` seção 7).
+  (`overview.md` seção 8).
 - Auditoria: toda transação recorrente/alerta/ação de IA fica rastreável
   (quem, quando, a partir de quê) — ver `ai-strategy.md` seção 5 (histórico
   de conversa) e `notification-service.yaml` (`AlertaResponse`).

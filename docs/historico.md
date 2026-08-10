@@ -1497,3 +1497,419 @@ Alterado: `docker-compose.yml`, `infra/mysql/init/01-databases.sql`,
 `docs/architecture/diagrams.md`, `docs/architecture/overview.md`,
 `docs/roadmap.md`, `README.md`, `docs/tasks.md` (itens 10–11, fatia 3
 fechada).
+
+## 2026-08-10 — CI do document-service: falso positivo do OWASP Dependency-Check
+
+Pedido: "vamos preparar o commit agora" e depois "sim, pode fazer push" —
+ao subir o `document-service` pela primeira vez pro GitHub, o CI pegou de
+verdade um achado que não tinha como testar localmente (a scan real
+depende da `NVD_API_KEY`, que só existe como secret do GitHub).
+
+O job `document-service` falhou no passo "Scan de vulnerabilidade (OWASP
+Dependency-Check)": `quarkus-mongodb-client`/`quarkus-mongodb-panache`
+(dependência direta pra Mongo Panache, ADR-0005, mais a transitiva dela)
+batiam com o CPE `cpe:2.3:a:mongodb:mongodb:3.38.1` — o Dependency-Check
+interpretando "3.38.1" (versão do Quarkus) como se fosse uma versão do
+produto **MongoDB Server**, que nem existe nessa numeração. Falso
+positivo clássico de CPE mal atribuído a uma versão coincidente, não uma
+vulnerabilidade real (CVE-2021-32036/2025-14847/2026-9753/2014-8180,
+CVSS até 8.7 — acima do gate `failBuildOnCVSS=7` do ADR-0017).
+
+Levou 4 pushes pra sair do vermelho, cada um corrigindo um erro diferente
+na sintaxe do arquivo de supressão (`dependency-check-suppression.xml`,
+novo, com `<suppressionFiles>` wireado no `pom.xml`):
+
+1. Regra por `<packageUrl>` + `<cpe regex="true">` — deu "zero matches"
+   no log do CI mesmo com o CPE aparentemente batendo. Causa: quando
+   `<packageUrl>` e `<cpe>` aparecem juntos numa regra, o Dependency-Check
+   exige que **todos** os CPEs daquela dependência batam com o filtro —
+   e o artefato também carrega o CPE correto `quarkus:quarkus`, que não
+   bate com um filtro só de `mongodb:mongodb`. Trocado pra suprimir por
+   `<cve>ID</cve>` exato (mais robusto, não depende de combinação de
+   CPEs).
+2. `<packageUrl>` mirava em `quarkus-mongodb-client`, mas o achado da vez
+   era `quarkus-mongodb-panache` — nome de artefato errado, supressão
+   continuou sem efeito.
+3. Corrigido pra `quarkus-mongodb-panache`, mas o achado voltou a ser
+   `quarkus-mongodb-client` no scan seguinte — os dois JARs existem de
+   verdade (panache é dependência direta, client é transitiva dele) e
+   **os dois** carregam a mesma CPE incorreta; cada correção só tapava um
+   buraco e destapava o outro.
+4. Regex ampliado pra `quarkus-mongodb-.*`, cobrindo os dois artefatos de
+   uma vez — CI finalmente verde: testes, cobertura, build de imagem
+   Docker e o scan de vulnerabilidade todos passando, com
+   `account-service`/`transaction-service`/`card-service` corretamente
+   pulados pelo `paths-filter` (nenhum arquivo deles mudou).
+
+Lição registrada na nota de supressão (pra não repetir): supressão por
+CVE exato é mais confiável que por CPE quando o artefato carrega múltiplos
+CPEs; e ao suprimir por nome de artefato, checar se a dependência tem
+variantes/transitivas com o mesmo problema antes de considerar resolvido.
+
+Criado: `services/document-service/dependency-check-suppression.xml`.
+Alterado: `services/document-service/pom.xml` (wireia o
+`suppressionFiles`).
+
+## 2026-08-10 — fatia 4: spec do budget-service
+
+Pedido: "pode começar o budget-service, cria a spec primeiro".
+
+Antes de escrever a spec foi preciso fechar a regra exata de "disponível
+pra gastar" (PRD 3.3 deixa isso propositalmente em aberto, delegado pro
+`budget-service` decidir e documentar) — registrado em
+[ADR-0026](architecture/adr/0026-regra-calculo-disponivel-para-gastar.md):
+
+```
+disponivelParaGastar(mês) =
+    Σ saldo das contas CORRENTE/CARTEIRA (account-service)
+  − Σ valorTotal das faturas FECHADA com vencimento no mês (card-service)
+  − Σ valor das despesas recorrentes ATIVA com dataInicio <= fim do mês (transaction-service)
+  − reserva (valor único, definido no budget-service)
+```
+
+Decisões que ficaram registradas na ADR, pra não perder o porquê: só conta
+CORRENTE/CARTEIRA entram (poupança/investimento têm fricção pra resgatar,
+não são "disponível" no sentido do PRD); fatura só conta se `FECHADA` (não
+`ABERTA` — valor ainda não é definitivo, compras continuam entrando até o
+fechamento); despesa recorrente é aproximada como "regra ATIVA = 1
+compromisso fixo por mês", sem tentar prever se a ocorrência do mês já foi
+materializada pelo `transaction-service` — esse contrato não está
+documentado/estável ainda, duplicar esse cálculo de data seria mais
+frágil que a aproximação simples (que também é o modelo mental mais
+natural: "meu aluguel é R$X todo mês", independente do sistema já ter
+lançado a transação ou não). A resposta do endpoint devolve o
+detalhamento item a item de cada parcela (contas, faturas, despesas
+recorrentes), não só o total — requisito direto do PRD seção 6 (a IA
+precisa conseguir explicar de onde tirou o número).
+
+Spec (`docs/specs/budget-service.yaml`) ficou com dois grupos de endpoint
+independentes: orçamento por categoria/mês (`POST/GET /orcamentos`,
+`PUT/DELETE /orcamentos/{id}`, unique por usuarioId+categoria+mesReferencia,
+`valorConsumido` calculado chamando `transaction-service`
+`GET /transacoes/resumo-por-categoria`, endpoint que já existe) e o
+cálculo de disponível pra gastar (`GET /disponivel-para-gastar` +
+`GET/PUT /reserva`) — funcionalidades relacionadas mas que não
+compartilham cálculo entre si. Três integrações de saída novas (todas
+leitura, token do usuário propagado — mesmo padrão de dois tokens do
+ADR-0025): `account-service`, `card-service`, `transaction-service`.
+
+`docs/tasks.md` ganhou a seção da fatia 4 (item 1 = spec, concluído; itens
+2–7 = scaffold/domínio/clientes/casos de uso/REST/fechamento, ainda não
+iniciados). `docs/roadmap.md`: fatia 4 → 🔶 Em andamento.
+
+Criado: `docs/specs/budget-service.yaml`,
+`docs/architecture/adr/0026-regra-calculo-disponivel-para-gastar.md`.
+Alterado: `docs/tasks.md` (fatia 4 detalhada), `docs/roadmap.md` (status
++ próxima ação concreta).
+
+## 2026-08-10 — item 2: scaffold do budget-service
+
+Pedido: "pode seguir, cria o scaffold do budget-service".
+
+Mesmo padrão dos scaffolds anteriores (copiado de `card-service`, ajustado
+pro serviço novo): `pom.xml`, `mvnw`/`mvnw.cmd`, Dockerfiles (`jvm`/
+`legacy-jar`/`native`/`native-micro`), `application.properties` (porta
+8085), `.gitignore`/`.dockerignore`, `README.md`. `./mvnw compile`
+validado.
+
+Duas diferenças de propósito em relação ao `card-service`, ambas ligadas
+ao ADR-0026 (todas as três chamadas de saída do `budget-service` propagam
+o token do próprio usuário, nenhuma usa role `service`): `pom.xml` sem
+`quarkus-scheduler` (não tem job agendado nessa fatia) e sem
+`quarkus-rest-client-oidc-filter`; `application.properties` sem bloco
+`quarkus.oidc-client`/`client_credentials` — mesmo padrão "bearer only,
+sem service account" já usado no Keycloak do `document-service`
+(ADR-0025), só que aqui vale pra três integrações de saída ao mesmo tempo,
+não uma. Três blocos de REST client já configurados (account-service
+`:8081`, card-service `:8083`, transaction-service `:8082`), ainda sem
+interface Java nenhuma — só a config.
+
+`overview.md`: linha do `budget-service` na tabela de serviços →
+🔶 Em andamento.
+
+Criado: `services/budget-service/` (scaffold completo, sem
+domínio/persistência/REST ainda — próximo passo é o item 3 do backlog em
+`docs/tasks.md`). Alterado: `docs/tasks.md` (item 2 concluído),
+`docs/architecture/overview.md` (status do serviço).
+
+## 2026-08-10 — item 3: domínio e persistência do budget-service
+
+Pedido: "pode seguir pro item 3".
+
+`Orcamento` (aggregate root) e `Reserva` — copiando de perto o padrão já
+estabelecido em `Cartao`/`Fatura` do `card-service` (factory `criar()` com
+validação, `reconstituir()` pra hidratar da persistência sem revalidar,
+mutação por método de domínio nunca por setter solto). Duas decisões que
+vale registrar (nenhuma virou ADR — são detalhes de implementação dentro
+da regra já fechada em ADR-0026, não decisão de arquitetura nova):
+
+- `Orcamento.mesReferencia` é `YearMonth`, não `String` — mesmo tipo já
+  usado em `Fatura.competencia` do card-service, convertido pra
+  `String` (formato AAAA-MM) só na borda da persistência
+  (`OrcamentoMapper`), mesma técnica.
+- `valorConsumido`/`valorDisponivel` (que aparecem no
+  `OrcamentoResponse` da spec) **não** entram no domínio nem são
+  persistidos — são calculados na hora pelo caso de uso de listagem
+  (item 5), chamando `transaction-service`. O domínio só guarda o que é
+  fonte de verdade (`valorLimite`), nunca um valor derivado que ficaria
+  desatualizado.
+- Duplicata de orçamento (mesma categoria+mês, usuário) é rejeitada em
+  código (`OrcamentoRepository.existeAtivo`, checado pelo caso de uso de
+  criação), não por `UNIQUE` no banco — motivo: cancelar um orçamento e
+  criar outro pra mesma categoria/mês no futuro é fluxo válido (orçamento
+  cancelado não deveria bloquear um novo), e um `UNIQUE` simples em
+  (usuario_id, categoria, mes_referencia) bloquearia isso incluindo
+  cancelados. Ficou só um índice não-único pra performance de consulta.
+
+`Reserva` foge do molde de aggregate — é config de valor único por
+usuário (`usuarioId` é a própria chave primária na tabela, sem id
+gerado à parte), sempre upsert, sem histórico. `Reserva.semDefinir(usuarioId)`
+modela o estado "usuário nunca configurou" (valor 0, `atualizadoEm`
+nulo) — usado pelo caso de uso de busca (item 5) quando o repositório não
+acha linha nenhuma, pra `GET /reserva` nunca precisar devolver 404 (spec
+já dizia isso, agora o domínio reflete).
+
+Persistência: `OrcamentoEntity`/`ReservaEntity` + mapper + Panache
+repository + `*RepositoryImpl`, mesmo padrão exato de
+`CartaoEntity`/`CartaoMapper`/`CartaoPanacheRepository`/
+`CartaoRepositoryImpl`. Duas migrations Flyway novas
+(`V1__create_orcamentos_table.sql`, `V2__create_reservas_table.sql`).
+
+12 testes de domínio (`OrcamentoTest`, `ReservaTest`), `./mvnw test`
+verde. Sem teste de integração de banco ainda — mesmo padrão já usado no
+`document-service` (item 2, 2026-08-09): fica pra ser exercida pelos
+testes REST do item 6, quando o serviço já tiver endpoint pra testar de
+ponta a ponta, em vez de duplicar setup de Testcontainers cedo demais.
+
+Criado: `services/budget-service/src/main/java/.../domain/` (`Orcamento`,
+`StatusOrcamento`, `OrcamentoRepository`, `OrcamentoNaoEncontradoException`,
+`OrcamentoJaExisteException`, `Reserva`, `ReservaRepository`),
+`.../infrastructure/persistence/` (`OrcamentoEntity`/`Mapper`/
+`PanacheRepository`/`RepositoryImpl`, `ReservaEntity`/`Mapper`/
+`PanacheRepository`/`RepositoryImpl`), `.../resources/db/migration/`
+(V1, V2), testes de domínio. Alterado: `docs/tasks.md` (item 3
+concluído).
+
+## 2026-08-10 — item 4: clientes de saída do budget-service
+
+Pedido: "pode seguir pro item 4".
+
+Três portas novas em `domain/` (`AccountServiceClient`, `CardServiceClient`,
+`TransactionServiceClient`) + implementação REST em `infrastructure/client/`
+— achado que simplificou o design em relação ao padrão já visto em
+card-service/document-service: nenhum dos cinco endpoints chamados aqui
+(`GET /contas`, `GET /cartoes`, `GET /cartoes/{id}/faturas`,
+`GET /transacoes-recorrentes`, `GET /transacoes/resumo-por-categoria`)
+recebe um id de entrada pra confirmar posse — todos já filtram pelo `sub`
+do token no próprio servidor. Isso eliminou a necessidade do padrão de
+dois clientes por integração (`*UsuarioClient` pra posse +
+`*InternoClient` pra ação, visto em card-service/document-service): aqui
+é só propagação de token, `PropagarAutorizacaoHeadersFactory` único,
+compartilhado pelos três `@RegisterRestClient`.
+
+`CardServiceClientImpl` é o único que orquestra mais de uma chamada:
+card-service não expõe "todas as faturas em aberto do usuário" — o
+cliente lista os cartões ativos primeiro, depois busca as faturas
+`FECHADA` de cada um, achatando o resultado. Decisão de onde filtrar por
+mês: nos clientes, não — `AccountServiceClient`/`CardServiceClient`/
+`TransactionServiceClient` devolvem os dados brutos (todas as contas,
+todas as faturas fechadas de qualquer mês, todas as despesas recorrentes
+ativas); o filtro por `dataVencimento`/`dataInicio` dentro do mês
+consultado é responsabilidade do caso de uso (item 5) — os clientes não
+têm opinião sobre "qual mês", só sabem buscar o dado.
+
+Cada porta ganhou seu próprio tipo de retorno no domínio (`Conta`,
+`FaturaFechada`, `DespesaRecorrente`, `ResumoCategoria` — records
+simples, só os campos que o cálculo do ADR-0026 precisa), separados dos
+DTOs de infraestrutura (`ContaDto`/`CartaoDto`/`FaturaDto`/
+`TransacaoRecorrenteDto`/`ResumoCategoriaDto`) que espelham só o
+subconjunto necessário da resposta real de cada serviço — mesmo
+princípio já usado em `ContaDto` do card-service ("só os campos que este
+serviço precisa").
+
+Sem teste dedicado pros três `*ClientImpl` — mesmo padrão já estabelecido
+no projeto (`AccountServiceClientImpl` do card-service, `OllamaLlmProvider`
+do document-service): thin adapter, mockado nos testes de quem usa
+(caso de uso no item 5, REST no item 6), nunca testado contra o serviço
+real em CI (`testing-strategy.md` seção 2). `./mvnw compile`/`test`
+validados, 12 testes de domínio continuam verdes (nada quebrou).
+
+Criado: `services/budget-service/src/main/java/.../domain/`
+(`Conta`, `AccountServiceClient`, `FaturaFechada`, `CardServiceClient`,
+`DespesaRecorrente`, `ResumoCategoria`, `TransactionServiceClient`),
+`.../infrastructure/client/` (`PropagarAutorizacaoHeadersFactory`,
+`AccountServiceRestClient`/`ClientImpl`, `CardServiceRestClient`/
+`ClientImpl`, `TransactionServiceRestClient`/`ClientImpl`, `dto/`).
+Alterado: `docs/tasks.md` (item 4 concluído).
+
+## 2026-08-10 — item 5: casos de uso do budget-service
+
+Pedido: "pode seguir pro item 5".
+
+Sete casos de uso em `application/`: `CriarOrcamentoUseCase`,
+`AtualizarOrcamentoUseCase`, `ExcluirOrcamentoUseCase`,
+`ListarOrcamentosUseCase`, `DefinirReservaUseCase`, `BuscarReservaUseCase`
+e `CalcularDisponivelParaGastarUseCase` — esse último é onde a fórmula do
+ADR-0026 finalmente vira código, depois de três sessões só preparando o
+terreno (spec, domínio, clientes).
+
+`OrcamentoDetalhe` (application, `record Orcamento + valorConsumido`) é o
+mesmo molde de `FaturaDetalhe` do card-service — combina o aggregate com
+um valor calculado na hora, sem persistir o calculado. Achado de
+eficiência ao implementar `ListarOrcamentosUseCase`: em vez de perguntar
+ao `transaction-service` o gasto de cada orçamento individualmente (N
+chamadas pra N orçamentos do mês), busca o resumo por categoria **uma
+vez só pro mês inteiro** e monta um mapa categoria→gasto reaproveitado —
+testado explicitamente (`naoDeveriaChamarTransactionService_quandoNenhumOrcamentoAtivo`
+verifica que o cliente nem é chamado se a lista vier vazia, e o teste de
+listagem com dois orçamentos verifica só uma chamada ao resumo).
+
+`CalcularDisponivelParaGastarUseCase` é onde o filtro por mês (que os
+clientes do item 4 deixaram propositalmente de fora) finalmente
+acontece: contas filtradas por `tipo` (`CORRENTE`/`CARTEIRA`, poupança/
+investimento excluídas), faturas filtradas por `dataVencimento` dentro
+do mês consultado, despesas recorrentes filtradas por `dataInicio <=` fim
+do mês. Reserva vem do próprio repositório local (`ReservaRepository`,
+não é chamada de outro serviço). Resultado (`DisponivelParaGastarResultado`)
+carrega os totais E as listas completas de cada parcela (contas, faturas,
+despesas recorrentes) — a spec já previa isso (campo `detalhamento`),
+aqui é onde os dados pra preencher esse campo são de fato calculados.
+
+30 testes no total (18 novos, incluindo um teste que exercita a fórmula
+completa com números reais — 3 contas de tipos diferentes, 2 faturas em
+meses diferentes, 2 despesas recorrentes com `dataInicio` diferentes —
+verificando que só o que deveria entrar no cálculo entra), `./mvnw test`
+verde.
+
+Criado: `services/budget-service/src/main/java/.../application/`
+(`OrcamentoDetalhe`, `CriarOrcamentoCommand`/`UseCase`,
+`AtualizarOrcamentoCommand`/`UseCase`, `ExcluirOrcamentoUseCase`,
+`ListarOrcamentosUseCase`, `DefinirReservaCommand`/`UseCase`,
+`BuscarReservaUseCase`, `DisponivelParaGastarResultado`,
+`CalcularDisponivelParaGastarUseCase`) + testes correspondentes.
+Alterado: `docs/tasks.md` (item 5 concluído).
+
+## 2026-08-10 — item 6: REST do budget-service (fecha a implementação)
+
+Pedido: "pode seguir pro item 6".
+
+Três resources em `infrastructure/rest/`: `OrcamentoResource`
+(`POST/GET /orcamentos`, `PUT/DELETE /orcamentos/{id}`), `ReservaResource`
+(`GET/PUT /reserva`), `DisponivelParaGastarResource`
+(`GET /disponivel-para-gastar`) — todos seguindo o molde já estabelecido
+(`usuarioIdAutenticado()` extrai `sub` do JWT, nunca aceita do corpo da
+requisição, ADR-0003; DTOs de resposta com `static de(...)`, mesmo
+padrão de `CartaoResponse`/`FaturaResponse` do card-service).
+
+Achado técnico ao tipar o query param `mes`: `YearMonth` não funciona
+como tipo de `@QueryParam` — JAX-RS só converte automaticamente tipos com
+`valueOf(String)` ou `fromString(String)` estático (ou construtor de
+String), e `YearMonth` só tem `parse(CharSequence)`, que não conta. Saída:
+`mes` fica `String` com `@Pattern` validando o formato `AAAA-MM` (mesmo
+regex da spec), convertido pra `YearMonth.parse(mes)` manualmente dentro
+do método. Já no *corpo* das requisições (`CriarOrcamentoRequest.mesReferencia`)
+`YearMonth` funciona sem nenhum ajuste — Jackson desserializa via
+`JavaTimeModule`, já ativo no projeto por causa de `Instant`/`LocalDate`
+usados nos outros serviços (mesma dependência, sem configuração nova).
+
+`OrcamentoResponse.de(OrcamentoDetalhe)` é onde `valorDisponivel`/
+`percentualConsumido` são finalmente calculados — na borda REST, não no
+caso de uso (item 5 só devolve `Orcamento` + `valorConsumido` cru,
+consistente com a divisão já usada em `FaturaDetalhe`/`FaturaResponse`
+do card-service: aggregate + dado calculado no `application`, derivação
+puramente aritmética/apresentacional no `infrastructure/rest`).
+
+19 testes de integração novos (`@QuarkusTest` + RestAssured + `QuarkusMock`
+pros três `*ClientImpl`, mesmo padrão de `CartaoResourceTest`). Dois
+achados durante os testes, ambos já vistos antes no projeto mas
+reencontrados aqui:
+- Fixture de `sub` de teste com caractere fora do alfabeto hexadecimal
+  (`"b0dge7000..."`, o `g` não é hex) quebrava `UUID.fromString` — trocado
+  por um valor hex válido (`"b0d9e700..."`).
+- Dois testes que criavam orçamento "Mercado"/2026-08 pro mesmo usuário
+  de um teste anterior (mesma classe, sem rollback automático entre
+  métodos — lição já registrada desde a fatia 2/`CartaoResourceTest`)
+  colidiam com a checagem de duplicata (`OrcamentoJaExisteException`,
+  422 em vez do 201/200 esperado) — corrigido com `sub` dedicado por
+  teste que precisa de estado isolado.
+- `BigDecimal.ZERO` serializa como `0` no JSON, não `0.0` — asserções
+  Hamcrest com `equalTo(0.0f)` falhavam contra o `0` inteiro devolvido
+  pela API (`Reserva.semDefinir`/`disponivelParaGastar` sem nenhum dado).
+
+49 testes no total do `budget-service` (30 anteriores + 19 novos),
+`./mvnw test` verde — **fecha a implementação da fatia 4** (só falta o
+item 7: docker-compose/CI/Keycloak/Postman/diagramas, mesmo padrão do
+item 11 da fatia 3).
+
+Criado: `services/budget-service/src/main/java/.../infrastructure/rest/`
+(`OrcamentoResource`, `ReservaResource`, `DisponivelParaGastarResource`,
+`OrcamentoNaoEncontradoExceptionMapper`, `OrcamentoJaExisteExceptionMapper`,
+`ConstraintViolationExceptionMapper`, `dto/` — `CriarOrcamentoRequest`,
+`AtualizarOrcamentoRequest`, `OrcamentoResponse`, `DefinirReservaRequest`,
+`ReservaResponse`, `DisponivelParaGastarResponse`,
+`DetalhamentoDisponivel`, `ContaResumo`, `FaturaResumo`,
+`DespesaRecorrenteResumo`, `ErroResponse`, `ErroValidacaoResponse`) +
+testes de integração. Alterado: `docs/tasks.md` (item 6 concluído).
+
+## 2026-08-10 — item 7: fecha a fatia 4 (docker-compose, CI, Keycloak, Postman, diagramas)
+
+Pedido: "pode seguir pro item 7" — mesmo padrão de fechamento já usado no
+item 11 da fatia 3 (`document-service`).
+
+`docker-compose.yml` ganhou o serviço `budget-service` (depende de mysql/
+account-service/card-service/transaction-service) — subido e validado de
+verdade contra a stack real: `./mvnw package -DskipTests` +
+`docker compose up -d --build budget-service`, build limpo, Flyway
+aplicou as duas migrations (`orcamentos`/`reservas`) na subida,
+`GET /q/health` → 200. `budget_db` criado (script de init + aplicado
+direto no container MySQL já rodando, mesmo padrão das fatias
+anteriores).
+
+Keycloak: client `budget-service` registrado com `bearerOnly: true`,
+**sem** service-account — mesmo motivo do `document-service` (ADR-0025),
+generalizado aqui pras três integrações de saída do `budget-service`
+(ADR-0026): nenhuma delas usa client_credentials, todas propagam o token
+do próprio usuário, então `bearerOnly: true` é suficiente. Aplicado
+também no realm já importado no container rodando (`kcadm.sh create
+clients`, mesmo comando das vezes anteriores).
+
+CI: job `budget-service` novo em `ci.yml`, mesmo template dos outros
+quatro (testes + cobertura JaCoCo + build de imagem Docker de validação +
+OWASP Dependency-Check), `budget-service` adicionado ao filtro de paths
+do job `changes`. Não rodei o dependency-check localmente (mesmo motivo
+de sempre — `NVD_API_KEY` só existe como secret do GitHub); se aparecer
+outro falso positivo de CPE como o do `document-service` (2026-08-10,
+`quarkus-mongodb-*`), o processo de diagnóstico já está documentado nesse
+histórico.
+
+Postman: os 7 endpoints do `budget-service` documentados em
+`mudancas-manuais.txt` (orçamento CRUD, reserva, disponível pra gastar)
++ `budget_service_url` no environment.
+
+Documentação viva atualizada pra refletir a fatia entregue: `diagrams.md`
+(container graph sem mais "(planejado)", três arestas síncronas novas
+pros três serviços consultados, seção 3.5 nova com o ER conceitual de
+`Orcamento`/`Reserva` — substituindo a seção "Pendente" que só linkava
+pro roadmap —, seção 4.6 nova com o diagrama de classes do domínio,
+mesmo nível de detalhe das seções 4.1–4.5 dos outros serviços);
+`overview.md` (tabela de serviços → ✅ Entregue, seção 6 nova com o
+diagrama de sequência do fluxo "disponível pra gastar" — as três
+chamadas síncronas de leitura e onde o filtro por mês acontece —, seções
+seguintes renumeradas); `roadmap.md` (fatia 4 → ✅ Entregue, próxima ação
+aponta pra fatia 5); `README.md` raiz (parágrafo do serviço, tabela de
+endpoints, contagem de serviços no CI/docker compose de quatro pra
+cinco).
+
+Isso fecha a fatia 4 do roadmap — `budget-service` entregue de ponta a
+ponta: spec (item 1) → ADR-0026 (regra de cálculo) → domínio/persistência
+(item 3) → clientes de saída (item 4) → casos de uso (item 5) → REST
+(item 6) → infra/CI/documentação (item 7). 49 testes, CI configurado,
+container validado contra a stack real.
+
+Alterado: `docker-compose.yml`, `infra/mysql/init/01-databases.sql`,
+`infra/keycloak/realm-financas.json`, `.github/workflows/ci.yml`,
+`docs/postman/mudancas-manuais.txt`,
+`docs/postman/financas-dev.postman_environment.json`,
+`docs/architecture/diagrams.md`, `docs/architecture/overview.md`,
+`docs/roadmap.md`, `README.md`, `docs/tasks.md` (item 7, fatia 4
+fechada).

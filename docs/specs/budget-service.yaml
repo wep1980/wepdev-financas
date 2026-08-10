@@ -1,0 +1,284 @@
+openapi: 3.0.3
+info:
+  title: Budget Service - Sistema de Finanças Pessoais
+  description: >
+    Orçamento por categoria/mês e cálculo de "disponível pra gastar" (PRD
+    3.3). Cruza dado de account-service (saldo), card-service (fatura em
+    aberto) e transaction-service (gasto por categoria, despesa recorrente)
+    de forma síncrona, propagando o token do usuário autenticado (mesmo
+    padrão de dois tokens do document-service, ver ADR-0025) — regra exata
+    de cálculo documentada em ADR-0026.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8085
+paths:
+  /api/v1/orcamentos:
+    post:
+      summary: >
+        Cria um orçamento (limite de gasto) pra uma categoria num mês
+        específico. `usuarioId` não faz parte do corpo — vem do claim `sub`
+        do token, igual aos outros serviços (ADR-0003).
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarOrcamentoRequest"
+      responses:
+        "201":
+          description: Orçamento criado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrcamentoResponse" }
+        "400":
+          description: Campo obrigatório ausente/inválido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroValidacaoResponse" }
+        "422":
+          description: Já existe orçamento ativo pra essa categoria nesse mês (usuarioId + categoria + mesReferencia é único)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroResponse" }
+    get:
+      summary: >
+        Lista os orçamentos ativos do usuário autenticado num mês, cada um
+        já com valorConsumido/valorDisponivel/percentualConsumido
+        calculados na hora (chama transaction-service
+        GET /transacoes/resumo-por-categoria pro período do mês).
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: mes
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+          description: Formato AAAA-MM
+      responses:
+        "200":
+          description: Lista de orçamentos do mês
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OrcamentoResponse" }
+        "400":
+          description: Parâmetro mes ausente ou fora do formato AAAA-MM
+
+  /api/v1/orcamentos/{id}:
+    put:
+      summary: Atualiza o valorLimite de um orçamento
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarOrcamentoRequest"
+      responses:
+        "200":
+          description: Orçamento atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrcamentoResponse" }
+        "400":
+          description: Campo obrigatório ausente/inválido
+        "404":
+          description: Orçamento não encontrado (ou pertence a outro usuário)
+    delete:
+      summary: >
+        Exclui (logicamente) um orçamento — marca como CANCELADO, nunca
+        apaga a linha (CLAUDE.md princípio 5). Idempotente: excluir de novo
+        um orçamento já cancelado continua 204.
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Orçamento cancelado
+        "404":
+          description: Orçamento não encontrado (ou pertence a outro usuário)
+
+  /api/v1/reserva:
+    get:
+      summary: >
+        Busca a reserva atual do usuário autenticado. Nunca 404 — se o
+        usuário nunca definiu uma, devolve valor 0.
+      security: [{ oidc: [usuario] }]
+      responses:
+        "200":
+          description: Reserva atual (0 se nunca definida)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReservaResponse" }
+    put:
+      summary: >
+        Define (ou atualiza) a reserva do usuário autenticado — valor único
+        que o usuário quer manter de colchão, descontado do cálculo de
+        "disponível pra gastar" (ADR-0026). Não é por mês.
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DefinirReservaRequest"
+      responses:
+        "200":
+          description: Reserva definida/atualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReservaResponse" }
+        "400":
+          description: valor ausente ou negativo
+
+  /api/v1/disponivel-para-gastar:
+    get:
+      summary: >
+        Calcula quanto o usuário autenticado tem disponível pra gastar no
+        mês informado (PRD 3.3). Regra exata e o porquê de cada parcela:
+        ver ADR-0026. Chama account-service (saldo), card-service (fatura
+        em aberto) e transaction-service (despesa recorrente ativa) de
+        forma síncrona, propagando o token do usuário.
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: mes
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+          description: Formato AAAA-MM
+      responses:
+        "200":
+          description: >
+            Valor disponível e o detalhamento de cada parcela do cálculo —
+            devolvido explicitamente pra permitir auditoria (usuário) e
+            explicação rastreável (ai-service, PRD seção 6).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DisponivelParaGastarResponse" }
+        "400":
+          description: Parâmetro mes ausente ou fora do formato AAAA-MM
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/realms/financas/.well-known/openid-configuration
+  schemas:
+    CriarOrcamentoRequest:
+      type: object
+      required: [categoria, mesReferencia, valorLimite]
+      properties:
+        categoria: { type: string }
+        mesReferencia:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+          description: Formato AAAA-MM
+        valorLimite: { type: number, format: decimal, minimum: 0, exclusiveMinimum: true }
+    AtualizarOrcamentoRequest:
+      type: object
+      required: [valorLimite]
+      properties:
+        valorLimite: { type: number, format: decimal, minimum: 0, exclusiveMinimum: true }
+    OrcamentoResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        usuarioId: { type: string, format: uuid }
+        categoria: { type: string }
+        mesReferencia: { type: string, description: Formato AAAA-MM }
+        valorLimite: { type: number, format: decimal }
+        valorConsumido:
+          type: number
+          format: decimal
+          description: Soma de DESPESA CONFIRMADA da categoria no mesReferencia (transaction-service)
+        valorDisponivel:
+          type: number
+          format: decimal
+          description: valorLimite - valorConsumido (pode ficar negativo se estourou)
+        percentualConsumido: { type: number, format: decimal }
+        status: { type: string, enum: [ATIVO, CANCELADO] }
+        criadoEm: { type: string, format: date-time }
+
+    DefinirReservaRequest:
+      type: object
+      required: [valor]
+      properties:
+        valor: { type: number, format: decimal, minimum: 0 }
+    ReservaResponse:
+      type: object
+      properties:
+        usuarioId: { type: string, format: uuid }
+        valor: { type: number, format: decimal }
+        atualizadoEm: { type: string, format: date-time, nullable: true }
+
+    DisponivelParaGastarResponse:
+      type: object
+      properties:
+        mesReferencia: { type: string, description: Formato AAAA-MM }
+        saldoContas: { type: number, format: decimal, description: Soma do saldo das contas CORRENTE/CARTEIRA }
+        faturasEmAberto: { type: number, format: decimal, description: Soma das faturas FECHADA com vencimento no mês }
+        despesasRecorrentes: { type: number, format: decimal, description: Soma das despesas recorrentes ATIVA vigentes no mês }
+        reserva: { type: number, format: decimal }
+        valorDisponivel:
+          type: number
+          format: decimal
+          description: saldoContas - faturasEmAberto - despesasRecorrentes - reserva
+        detalhamento: { $ref: "#/components/schemas/DetalhamentoDisponivel" }
+    DetalhamentoDisponivel:
+      type: object
+      description: Item a item de cada parcela do cálculo, pra auditoria/explicação (ADR-0026)
+      properties:
+        contas:
+          type: array
+          items: { $ref: "#/components/schemas/ContaResumo" }
+        faturas:
+          type: array
+          items: { $ref: "#/components/schemas/FaturaResumo" }
+        despesasRecorrentes:
+          type: array
+          items: { $ref: "#/components/schemas/DespesaRecorrenteResumo" }
+    ContaResumo:
+      type: object
+      properties:
+        contaId: { type: string, format: uuid }
+        nome: { type: string }
+        tipo: { type: string }
+        saldo: { type: number, format: decimal }
+    FaturaResumo:
+      type: object
+      properties:
+        faturaId: { type: string, format: uuid }
+        cartaoApelido: { type: string }
+        valorTotal: { type: number, format: decimal }
+        dataVencimento: { type: string, format: date }
+    DespesaRecorrenteResumo:
+      type: object
+      properties:
+        transacaoRecorrenteId: { type: string, format: uuid }
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+
+    ErroResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+    ErroValidacaoResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+        erros:
+          type: array
+          items:
+            type: object
+            properties:
+              campo: { type: string }
+              mensagem: { type: string }

@@ -249,3 +249,26 @@ services:
     ports:
       - "8084:8084"
     networks: [financas-net]
+
+  budget-service:
+    build:
+      context: ./services/budget-service
+      dockerfile: src/main/docker/Dockerfile.jvm
+    container_name: financas-budget-service
+    depends_on:
+      mysql: { condition: service_healthy }
+      account-service: { condition: service_started }
+      card-service: { condition: service_started }
+      transaction-service: { condition: service_started }
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/budget_db
+      DB_USER: ${MYSQL_USER:-financas}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-financas}
+      KEYCLOAK_URL: http://keycloak:8080
+      ACCOUNT_SERVICE_URL: http://account-service:8081
+      CARD_SERVICE_URL: http://card-service:8083
+      TRANSACTION_SERVICE_URL: http://transaction-service:8082
+      OTEL_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8085:8085"
+    networks: [financas-net]
