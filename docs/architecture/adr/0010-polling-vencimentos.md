@@ -8,7 +8,7 @@ Data: 2026-08-06
 `notification-service` precisa alertar o usuário quando uma despesa
 recorrente ou fatura de cartão está perto de vencer (PRD 3.6). O padrão já
 estabelecido no projeto pra integração entre serviços é evento assíncrono via
-Kafka (ver `overview.md` seção 7/8) — mas eventos representam fatos que já
+Kafka (ver `overview.md` seção 8/9) — mas eventos representam fatos que já
 aconteceram ("transação criada"), e "vencimento daqui a 3 dias" não é um
 fato que acontece num instante, é uma projeção calculável a qualquer momento
 a partir de uma regra recorrente ainda ativa ou de uma fatura já emitida.

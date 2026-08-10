@@ -1,5 +1,5 @@
 MUDANÇAS MANUAIS NO POSTMAN — account-service, transaction-service,
-card-service e document-service
+card-service, document-service e budget-service
 ==================================================================================
 
 Este arquivo existe porque a collection do Postman NÃO é reimportada a
@@ -463,3 +463,65 @@ POST /api/v1/documentos/{id}/confirmar — confirmar lançamentos
     rodando também (e o transaction-service precisa ter o consumer
     ligado — nada visível na resposta HTTP indica se a Transacao foi
     criada, confira em GET /api/v1/transacoes do transaction-service).
+
+
+------------------------------------------------------------
+2026-08-10 — budget-service: serviço novo (fatia 4, orçamento + disponível pra gastar)
+------------------------------------------------------------
+
+Variável de environment nova: budget_service_url = http://localhost:8085
+
+Todos os endpoints chamam account-service/card-service/transaction-service
+por trás (síncrono, ADR-0026) — pra respostas com número diferente de
+zero, tenha conta(s)/cartão(ões)/transações reais cadastradas nesses
+serviços com o MESMO usuário do token usado aqui.
+
+POST /api/v1/orcamentos — criar orçamento por categoria/mês
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Body:
+    {
+      "categoria": "Mercado",
+      "mesReferencia": "2026-08",
+      "valorLimite": 800.00
+    }
+  - Resposta: 201 com valorConsumido/valorDisponivel/percentualConsumido
+    já calculados (consulta transaction-service na hora) / 400 (campo
+    ausente/inválido) / 422 (já existe orçamento ativo pra essa
+    categoria nesse mês).
+
+GET /api/v1/orcamentos?mes=2026-08 — listar orçamentos ativos do mês
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Query param obrigatório: mes (formato AAAA-MM)
+  - Resposta: 200, lista / 400 (mes ausente ou fora do formato).
+
+PUT /api/v1/orcamentos/{id} — atualizar limite
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Body: { "valorLimite": 1000.00 }
+  - Resposta: 200 / 400 / 404 (não existe ou não é seu).
+
+DELETE /api/v1/orcamentos/{id} — cancelar orçamento
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Idempotente: cancelar de novo continua 204.
+  - Resposta: 204 / 404 (não existe ou não é seu).
+
+GET /api/v1/reserva — buscar reserva atual
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Sem body. Nunca 404 — usuário que nunca definiu recebe valor 0.
+  - Resposta: 200.
+
+PUT /api/v1/reserva — definir/atualizar reserva
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Body: { "valor": 500.00 }
+  - Não é por mês — valor único que fica valendo até o usuário mudar de
+    novo. Descontado do cálculo de "disponível pra gastar" abaixo.
+  - Resposta: 200 / 400 (valor ausente ou negativo).
+
+GET /api/v1/disponivel-para-gastar?mes=2026-08 — cálculo do PRD 3.3
+  - Auth: OAuth 2.0, token de usuário (role "usuario")
+  - Query param obrigatório: mes (formato AAAA-MM)
+  - Regra exata do cálculo: docs/architecture/adr/0026-regra-calculo-disponivel-para-gastar.md
+    (resumo: saldo de contas CORRENTE/CARTEIRA − faturas de cartão
+    FECHADA vencendo no mês − despesas recorrentes ativas − reserva).
+  - Resposta: 200 com os totais E o detalhamento item a item (campo
+    "detalhamento": contas/faturas/despesasRecorrentes) — dá pra conferir
+    de onde veio cada número / 400 (mes ausente ou fora do formato).

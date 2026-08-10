@@ -50,6 +50,15 @@
       "directAccessGrantsEnabled": false
     },
     {
+      "clientId": "budget-service",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "serviceAccountsEnabled": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    },
+    {
       "clientId": "web-app",
       "enabled": true,
       "publicClient": true,

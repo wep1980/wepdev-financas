@@ -14,7 +14,7 @@ mostrar; mobile depois do web validado.
 | 1 | Contas + Transações (back-end) | `account-service` + `transaction-service` funcionando, testados, com fluxo síncrono de débito/crédito | ✅ Entregue (2026-08-08) |
 | 2 | `card-service` | Cartões de crédito, fatura e parcelamento, lançamento manual | ✅ Entregue (2026-08-09) |
 | 3 | `document-service` — parsing manual assistido | Upload de fatura (PDF), extração de lançamentos via LLM local, fluxo de confirmação (PRD 3.2). Extrato (PDF/CSV), boleto e foto via mobile ficam pra uma próxima fatia | ✅ Entregue (fatura PDF, 2026-08-09) |
-| 4 | `budget-service` | Orçamento por categoria/mês, cálculo de "disponível pra gastar" (PRD 3.3) | 🔲 Planejado |
+| 4 | `budget-service` | Orçamento por categoria/mês, cálculo de "disponível pra gastar" (PRD 3.3) | ✅ Entregue (2026-08-10) |
 | 5 | `ai-service` — RAG + chat | `LlmProvider` (ADR-0002), Qdrant (ADR-0005, confirmar antes), tools MCP, agente orquestrador, responde às perguntas do PRD 3.4 | 🔲 Planejado |
 | 6 | Front-end Next.js (React) | Dashboard com gráfico de gastos por categoria (PRD 3.7), CRUD completo de conta/transação, upload de documento, chat com a IA. Definir UX/identidade visual/tipografia/paleta antes ou no início desta fatia (ainda em aberto) | 🔲 Planejado |
 | 7 | App React Native | Mesmas funcionalidades do web, mobile-first | 🔲 Planejado |
@@ -39,6 +39,6 @@ mostrar; mobile depois do web validado.
 
 ## Próxima ação concreta
 
-Fatia 3 (`document-service`) entregue pra fatura PDF — ver
-`docs/tasks.md` pro que ficou de fora (extrato, boleto, foto) se quiser
-retomar antes de avançar. Próxima fatia do roadmap: 4 (`budget-service`).
+Fatia 4 (`budget-service`) entregue — orçamento por categoria/mês e
+"disponível pra gastar" (ADR-0026), 49 testes, CI verde. Próxima fatia do
+roadmap: 5 (`ai-service` — RAG + chat).

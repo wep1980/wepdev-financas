@@ -119,8 +119,20 @@ boleto e ingestão por foto (mobile) ficam pra uma fatia futura. 100+
 testes (incluindo um teste de integração que publica evento Kafka real),
 imagem Docker validada. Backlog completo (ver `docs/tasks.md`).
 
+**`budget-service`** calcula orçamento por categoria/mês e "disponível
+pra gastar" (PRD 3.3) — cruza `account-service` (saldo), `card-service`
+(fatura em aberto) e `transaction-service` (despesa recorrente, gasto por
+categoria) de forma síncrona, sempre propagando o token do próprio
+usuário, nenhuma chamada precisa de posse de um id específico (regra
+exata do cálculo e o porquê de cada parcela em
+[ADR-0026](docs/architecture/adr/0026-regra-calculo-disponivel-para-gastar.md)).
+Resposta devolve o detalhamento item a item de cada parcela (contas,
+faturas, despesas recorrentes), não só o total — dá pra auditar de onde
+veio o número. 49 testes, imagem Docker validada. Backlog completo (ver
+`docs/tasks.md`).
+
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
-(privado). CI 100% verde — `mvn test` passa nos quatro serviços no runner
+(privado). CI 100% verde — `mvn test` passa nos cinco serviços no runner
 hospedado, cobertura publicada como artefato do run (JaCoCo), a imagem
 Docker é validada a cada mudança (`docker build`, sem publicar em
 registry) e o scan de vulnerabilidade (OWASP Dependency-Check, ADR-0017)
@@ -129,13 +141,13 @@ também passa, com a `NVD_API_KEY` ativa (ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 
 `docker compose up -d --build account-service transaction-service
-card-service document-service` sobe os quatro serviços + toda a infra
-(MySQL, Redis, MongoDB, Keycloak, Kafka, Ollama, Prometheus, Grafana) do
-zero, com autenticação de verdade funcionando — validado ponta a ponta
-(criar conta → registrar transação/criar cartão/importar fatura → saldo
-atualizado, via containers). Pra desenvolvimento do dia a dia, mais
-rápido rodar só a infra via compose e os serviços em `mvn quarkus:dev`
-local (ver README de cada serviço).
+card-service document-service budget-service` sobe os cinco serviços +
+toda a infra (MySQL, Redis, MongoDB, Keycloak, Kafka, Ollama, Prometheus,
+Grafana) do zero, com autenticação de verdade funcionando — validado
+ponta a ponta (criar conta → registrar transação/criar cartão/importar
+fatura → saldo atualizado, via containers). Pra desenvolvimento do dia a
+dia, mais rápido rodar só a infra via compose e os serviços em
+`mvn quarkus:dev` local (ver README de cada serviço).
 
 ## Endpoints principais (`account-service`, porta `8081`)
 
@@ -223,6 +235,26 @@ GET subsequente. Detalhe completo (formatos de fatura suportados,
 integração com `account-service`/`transaction-service`) em
 [`services/document-service/README.md`](services/document-service/README.md).
 
+## Endpoints principais (`budget-service`, porta `8085`)
+
+Contrato completo em [`docs/specs/budget-service.yaml`](docs/specs/budget-service.yaml).
+
+| Método | Path | Role (OIDC) | O que faz |
+|---|---|---|---|
+| `POST` | `/api/v1/orcamentos` | `usuario` | Cria orçamento por categoria/mês; 422 se já existe um ativo pra essa categoria nesse mês |
+| `GET` | `/api/v1/orcamentos` | `usuario` | Lista orçamentos ativos do mês (`mes=AAAA-MM` obrigatório) com `valorConsumido`/`valorDisponivel` calculados na hora |
+| `PUT` | `/api/v1/orcamentos/{id}` | `usuario` | Atualiza o `valorLimite`; 404 se não for seu |
+| `DELETE` | `/api/v1/orcamentos/{id}` | `usuario` | Cancela (exclusão lógica, idempotente); 404 se não for seu |
+| `GET` | `/api/v1/reserva` | `usuario` | Busca a reserva atual (nunca 404 — valor 0 se nunca definida) |
+| `PUT` | `/api/v1/reserva` | `usuario` | Define/atualiza a reserva (valor único, não é por mês) |
+| `GET` | `/api/v1/disponivel-para-gastar` | `usuario` | Calcula "disponível pra gastar" no mês (`mes=AAAA-MM` obrigatório) — regra exata em ADR-0026 |
+
+`usuarioId` vem sempre do token. Todas as chamadas de saída (account-service/
+card-service/transaction-service) propagam o token do próprio usuário —
+nenhum endpoint interno (`role: service`) é usado aqui, diferente de
+`card-service`/`transaction-service`. Detalhe completo em
+[`services/budget-service/README.md`](services/budget-service/README.md).
+
 ## URLs úteis (ambiente de dev local)
 
 Depois de `docker compose up -d` (infra) + `mvn quarkus:dev` em cada
@@ -243,12 +275,14 @@ padrão pra produção, ainda não implantado) em
 | `card-service` — Swagger UI | `http://localhost:8083/q/swagger-ui` | — |
 | `document-service` (REST) | `http://localhost:8084` | token OIDC, ver abaixo |
 | `document-service` — Swagger UI | `http://localhost:8084/q/swagger-ui` | — |
+| `budget-service` (REST) | `http://localhost:8085` | token OIDC, ver abaixo |
+| `budget-service` — Swagger UI | `http://localhost:8085/q/swagger-ui` | — |
 | Keycloak (admin console) | `http://localhost:8080` | `admin` / `admin` |
 | Keycloak (token, realm `financas`) | `http://localhost:8080/realms/financas/protocol/openid-connect/token` | ver `infra/keycloak/realm-financas.json` |
 | Grafana | `http://localhost:3001` | `admin` / `admin` |
 | Kafka UI ([kafka-ui](https://github.com/provectus/kafka-ui) — tópicos, mensagens, config) | `http://localhost:8090` | — |
 | Prometheus | `http://localhost:9090` | — |
-| MySQL (`account_db`/`transaction_db`/`card_db`/`document_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
+| MySQL (`account_db`/`transaction_db`/`card_db`/`document_db`/`budget_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
 | MongoDB (`document_service`, ex: via MongoDB Compass) | `localhost:27017` | `financas` / `financas` |
 | Kafka (broker, ex: DBeaver/cliente Kafka) | `localhost:29092` | — |
 | Ollama (LLM local, ADR-0002) | `http://localhost:11500` | — (11500 no host, não 11434 — ver comentário no `docker-compose.yml`) |

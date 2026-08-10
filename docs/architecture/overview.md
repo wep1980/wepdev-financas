@@ -19,7 +19,7 @@ microsserviços em vez de monólito nesse projeto.
 | `transaction-service` | Registrar/consultar transações (inclusive recorrentes, ver ADR-0009); chama `account-service` p/ refletir no saldo | 8082 | MySQL (`transaction_db`) | ✅ Entregue — registrar/listar/editar/cancelar/resumo/recorrentes, 91 testes, CI verde |
 | `card-service` | Cartões de crédito, faturas, parcelamento — independente de `TipoConta.CARTAO_CREDITO` (ADR-0022) | 8083 | MySQL (`card_db`) | ✅ Entregue — CRUD de cartão + fatura/parcelamento/pagamento, 82 testes, CI verde |
 | `document-service` | Upload e parsing de fatura de cartão (PDF) via LLM local (Ollama, ADR-0002); extrato (PDF/CSV) e boleto de financiamento (ADR-0014) ficam pra fatias seguintes; no mobile, foto entra também depois (ADR-0015); gera lançamentos pendentes, usuário confirma, evento Kafka vira transação de verdade (ADR-0023) | 8084 | MongoDB (documento bruto + resultado do parsing) + MySQL (lançamentos pendentes) | ✅ Entregue (fatura PDF) — upload assíncrono + extração LLM + confirmação + evento, 100+ testes, CI verde |
-| `budget-service` | Orçamento por categoria/mês, cálculo de "disponível pra gastar" | 8085 | MySQL (`budget_db`) | Planejado |
+| `budget-service` | Orçamento por categoria/mês, cálculo de "disponível pra gastar" — cruza account-service/card-service/transaction-service de forma síncrona (ADR-0026) | 8085 | MySQL (`budget_db`) | ✅ Entregue — orçamento + disponível pra gastar, 49 testes, CI verde |
 | `ai-service` | Orquestração de agentes, RAG, chat em linguagem natural, MCP tools | 8086 | Qdrant (vetores, proposto ADR-0005) + MongoDB (histórico de conversas) | Planejado |
 | `notification-service` | Alertas de vencimento (despesa recorrente, fatura de cartão) via push/WhatsApp/e-mail; preferências de notificação por usuário | 8087 | MongoDB | Planejado |
 
@@ -145,7 +145,45 @@ FCM), ADR-0012 (WhatsApp via biblioteca não-oficial, risco assumido) e
 ADR-0013 (e-mail, proposta). Os três canais são independentes — falha num
 não afeta os outros (PRD seção 4).
 
-## 6. Multi-tenancy
+## 6. Fluxo: "disponível pra gastar" (`budget-service`)
+
+```mermaid
+sequenceDiagram
+    participant U as Usuário (front-end)
+    participant B as budget-service
+    participant A as account-service
+    participant C as card-service
+    participant T as transaction-service
+
+    U->>B: GET /disponivel-para-gastar?mes=2026-08
+    B->>A: GET /contas (token do usuário)
+    A-->>B: contas ativas (saldo por conta)
+    B->>C: GET /cartoes + GET /cartoes/{id}/faturas?status=FECHADA
+    C-->>B: faturas fechadas de todos os cartões
+    B->>T: GET /transacoes-recorrentes?status=ATIVA
+    T-->>B: despesas recorrentes ativas
+    B->>B: filtra por mês, aplica fórmula (ADR-0026)
+    B-->>U: total + detalhamento (contas/faturas/despesas)
+```
+
+Três chamadas síncronas de leitura, todas propagando o token do próprio
+usuário (mesmo padrão de dois tokens já usado em
+`document-service`→`account-service`, ADR-0025) — nenhuma confirma posse
+de um id específico, porque os cinco endpoints chamados já filtram pelo
+`sub` do token no servidor. O filtro por mês (fatura por
+`dataVencimento`, despesa recorrente por `dataInicio`) acontece dentro do
+`budget-service`, não nos clientes — `account-service`/`card-service`/
+`transaction-service` continuam devolvendo dado bruto, sem saber "qual
+mês" foi pedido. Regra exata da fórmula e o porquê de cada parcela:
+ADR-0026.
+
+`POST/GET/PUT/DELETE /orcamentos` (orçamento por categoria/mês) segue o
+mesmo princípio de leitura síncrona, mas só chama `transaction-service`
+(`GET /transacoes/resumo-por-categoria`, endpoint já existente, mesmo
+cálculo do dashboard/IA) — não tem diagrama próprio por ser mais simples
+que o fluxo acima.
+
+## 7. Multi-tenancy
 
 Todo dado é particionado por `usuarioId`. Autenticação/autorização via
 Keycloak (OIDC) — token carrega o `usuarioId` (subject) e roles
@@ -154,7 +192,7 @@ Keycloak (OIDC) — token carrega o `usuarioId` (subject) e roles
 Endpoints internos serviço-a-serviço usam role `service` (client credentials),
 nunca expostos ao front-end. Ver ADR-0003.
 
-## 7. Comunicação e consistência
+## 8. Comunicação e consistência
 
 - **Síncrono (REST)**: quando a operação precisa de efeito imediato e
   consistente (ex: transação → débito de saldo). Retry + timeout via SmallRye
@@ -165,7 +203,7 @@ nunca expostos ao front-end. Ver ADR-0003.
   JSON cru; evolução para CloudEvents/Avro + schema registry é item de
   roadmap, não bloqueante.
 
-## 8. Stack completa
+## 9. Stack completa
 
 Ver tabela no `README.md` raiz — não duplicado aqui pra evitar dessincronia
 entre os dois arquivos. Se a stack mudar, atualize os dois.
