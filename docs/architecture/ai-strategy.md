@@ -1,7 +1,7 @@
 # Estratégia de IA — `ai-service`
 
 > Decisões confirmadas: abstração de provedor desde o início (ADR-0002),
-> vector store proposto Qdrant (ADR-0005, ainda não confirmado). Este
+> vector store Qdrant (ADR-0005, confirmado em 2026-08-10). Este
 > documento detalha o desenho técnico em cima dessas decisões.
 
 ## 1. Princípio central

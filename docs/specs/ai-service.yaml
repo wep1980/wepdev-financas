@@ -1,0 +1,253 @@
+openapi: 3.0.3
+info:
+  title: AI Service - Sistema de Finanças Pessoais
+  description: >
+    Chat em linguagem natural sobre a situação financeira do usuário (PRD
+    3.4) e execução de ações via comando de IA, sempre com confirmação
+    explícita (PRD 3.5, ADR-0007). Orquestra RAG (Qdrant, ADR-0005) e
+    tools MCP que consultam account-service/budget-service/card-service/
+    transaction-service — detalhe do agente e das tools em
+    docs/architecture/ai-strategy.md, não repetido aqui. As tools MCP em
+    si (protocolo Model Context Protocol, não REST) não fazem parte
+    deste contrato OpenAPI — só a superfície REST voltada ao cliente
+    (web/mobile) é especificada aqui.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8086
+paths:
+  /api/v1/chat:
+    post:
+      summary: >
+        Envia uma mensagem na conversa. Um único endpoint pra tudo —
+        pergunta nova, comando de ação, correção de uma proposta pendente
+        ou confirmação ("sim", "confirmar") — o agente orquestrador
+        decide a intenção a partir do texto e do estado da conversa
+        (ai-strategy.md seção 4). Sem `conversaId`, inicia uma conversa
+        nova.
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Resposta do agente (consulta respondida, proposta de ação, ou confirmação de ação executada)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatResponse" }
+        "400":
+          description: mensagem ausente/vazia, ou conversaId em formato inválido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroValidacaoResponse" }
+        "404":
+          description: conversaId informado não existe (ou não é do usuário)
+        "422":
+          description: >
+            Usuário não tem provedor de IA configurado (ver
+            `/api/v1/configuracao`) — mensagem de negócio clara, resto
+            do sistema continua funcionando normalmente (ADR-0002).
+
+  /api/v1/conversas:
+    get:
+      summary: Lista as conversas do usuário autenticado, mais recente primeiro
+      security: [{ oidc: [usuario] }]
+      responses:
+        "200":
+          description: Lista de conversas (resumo, sem o histórico completo de mensagens)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ConversaResumo" }
+
+  /api/v1/conversas/{id}:
+    get:
+      summary: >
+        Busca o histórico completo de mensagens de uma conversa — usado
+        pelo cliente pra renderizar o chat e pra auditoria de "de onde
+        veio essa resposta" (PRD seção 6).
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Conversa com todas as mensagens, em ordem cronológica
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversaDetalheResponse" }
+        "404":
+          description: Conversa não encontrada (ou pertence a outro usuário)
+
+  /api/v1/configuracao:
+    get:
+      summary: >
+        Busca a configuração de IA do usuário autenticado. Nunca devolve
+        a API key em texto claro — só se está configurada ou não
+        (`configurado`).
+      security: [{ oidc: [usuario] }]
+      responses:
+        "200":
+          description: Configuração atual (provedor NENHUM/configurado=false se o usuário nunca configurou)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfiguracaoIaResponse" }
+    put:
+      summary: >
+        Define/atualiza o provedor de IA do usuário (OpenAI com API key
+        própria, ou Ollama — ADR-0002). A API key (se `OPENAI`) é
+        armazenada de forma criptografada, nunca em texto plano
+        (docs/architecture/security.md).
+      security: [{ oidc: [usuario] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfiguracaoIaRequest"
+      responses:
+        "200":
+          description: Configuração salva
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfiguracaoIaResponse" }
+        "400":
+          description: >
+            Campo obrigatório ausente/inválido (ex: `provedor=OPENAI` sem
+            `apiKey`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErroValidacaoResponse" }
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/realms/financas/.well-known/openid-configuration
+  schemas:
+    ChatRequest:
+      type: object
+      required: [mensagem]
+      properties:
+        conversaId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Omitido/null = inicia uma conversa nova
+        mensagem: { type: string }
+    ChatResponse:
+      type: object
+      properties:
+        conversaId: { type: string, format: uuid }
+        resposta:
+          type: string
+          description: Resposta em linguagem natural do agente
+        tipo:
+          type: string
+          enum: [RESPOSTA, PROPOSTA_ACAO, ACAO_EXECUTADA]
+          description: >
+            RESPOSTA = consulta respondida (PRD 3.4); PROPOSTA_ACAO =
+            resumo de ação aguardando confirmação explícita, nada
+            persistido ainda (ADR-0007); ACAO_EXECUTADA = usuário
+            confirmou e a mutação já aconteceu
+        acaoProposta:
+          allOf:
+            - $ref: "#/components/schemas/AcaoProposta"
+          nullable: true
+          description: Preenchido só quando tipo=PROPOSTA_ACAO
+        trace:
+          type: array
+          description: Tools MCP chamadas pra montar a resposta — rastreabilidade (PRD seção 6)
+          items: { $ref: "#/components/schemas/ToolInvocada" }
+    AcaoProposta:
+      type: object
+      description: Resumo estruturado da ação que o agente propõe executar — espelha o texto de "resposta", pra o cliente poder renderizar um resumo formatado além do texto livre
+      properties:
+        tipo: { type: string, enum: [RECEITA, DESPESA] }
+        descricao: { type: string }
+        valor: { type: number, format: decimal }
+        recorrente: { type: boolean }
+        frequencia: { type: string, enum: [MENSAL], nullable: true }
+        quantidadeOcorrencias:
+          type: integer
+          nullable: true
+          description: null = indefinida (só relevante se recorrente=true)
+        contaId: { type: string, format: uuid, nullable: true }
+        categoria: { type: string, nullable: true }
+        expiraEm:
+          type: string
+          format: date-time
+          description: Depois desse instante a proposta não pode mais ser confirmada (ADR-0007) — usuário precisa pedir de novo
+    ToolInvocada:
+      type: object
+      properties:
+        nome: { type: string, description: 'Nome da tool MCP, ex: "buscar_saldo_disponivel"' }
+        resumo: { type: string, description: Descrição curta do que foi consultado/feito, pra auditoria }
+    ConversaResumo:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        iniciadaEm: { type: string, format: date-time }
+        ultimaMensagemEm: { type: string, format: date-time }
+        ultimaMensagemPreview: { type: string }
+    ConversaDetalheResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        iniciadaEm: { type: string, format: date-time }
+        mensagens:
+          type: array
+          items: { $ref: "#/components/schemas/MensagemConversa" }
+    MensagemConversa:
+      type: object
+      properties:
+        autor: { type: string, enum: [USUARIO, AGENTE] }
+        texto: { type: string }
+        tipo:
+          type: string
+          enum: [RESPOSTA, PROPOSTA_ACAO, ACAO_EXECUTADA]
+          nullable: true
+          description: Preenchido só em mensagens do AGENTE
+        criadaEm: { type: string, format: date-time }
+    ConfiguracaoIaRequest:
+      type: object
+      required: [provedor]
+      properties:
+        provedor: { type: string, enum: [OPENAI, OLLAMA] }
+        apiKey:
+          type: string
+          nullable: true
+          description: Obrigatório se provedor=OPENAI; ignorado se OLLAMA
+        ollamaUrl:
+          type: string
+          nullable: true
+          description: Opcional se provedor=OLLAMA — omitido usa a instância local default
+    ConfiguracaoIaResponse:
+      type: object
+      properties:
+        provedor: { type: string, enum: [NENHUM, OPENAI, OLLAMA] }
+        configurado:
+          type: boolean
+          description: false se provedor=NENHUM ou se a configuração está incompleta
+        ollamaUrl: { type: string, nullable: true }
+
+    ErroResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+    ErroValidacaoResponse:
+      type: object
+      properties:
+        mensagem: { type: string }
+        erros:
+          type: array
+          items:
+            type: object
+            properties:
+              campo: { type: string }
+              mensagem: { type: string }

@@ -1913,3 +1913,610 @@ Alterado: `docker-compose.yml`, `infra/mysql/init/01-databases.sql`,
 `docs/architecture/diagrams.md`, `docs/architecture/overview.md`,
 `docs/roadmap.md`, `README.md`, `docs/tasks.md` (item 7, fatia 4
 fechada).
+
+## 2026-08-10 — fatia 5: Qdrant confirmado e spec do ai-service
+
+Pedido: "pode seguir pro item 1 do ai-service".
+
+Antes de escrever a spec, uma pendência real bloqueava: ADR-0005 (Qdrant
+como vector store) estava desde 2026-08-06 marcada como "proposta, não
+confirmada — decisão minha, revisar antes de implementar o ai-service".
+Perguntei ao usuário; resposta: **Qdrant confirmado** (opção
+recomendada, mantendo o plano já documentado em `ai-strategy.md`).
+ADR-0005 → `Aceita`.
+
+Spec (`docs/specs/ai-service.yaml`) ficou com 4 endpoints:
+`POST /chat`, `GET /conversas`, `GET /conversas/{id}`,
+`GET/PUT /configuracao`. Duas decisões de desenho tomadas ao escrever,
+nenhuma delas prevista em ADR anterior:
+
+- **Um único endpoint pra tudo o que acontece na conversa**
+  (`POST /api/v1/chat`): pergunta nova, comando de ação, correção de uma
+  proposta pendente e a confirmação em si ("sim"/"confirmar") passam
+  todos pelo mesmo endpoint — o agente orquestrador decide a intenção
+  pelo texto + estado da conversa (`ai-strategy.md` seção 4.2 já
+  descrevia esse fluxo, só não explicitava que seria tudo num endpoint
+  só). Diferente do padrão do `document-service`, que usa um
+  `POST /confirmar` estruturado com ids explícitos — aqui a confirmação
+  é conversacional por natureza (PRD 3.5 é explícito: comando falado ou
+  escrito, resposta em linguagem natural), então um endpoint separado
+  não fazia sentido.
+- **Configuração de IA por usuário** (`GET/PUT /api/v1/configuracao`) é
+  decisão nova: `ai-strategy.md` diz "cada usuário escolhe o seu
+  [provedor]" — diferente do `document-service`, que usa um Ollama único
+  pra todos via variável de ambiente (`OLLAMA_BASE_URL`/`OLLAMA_MODEL`).
+  Como nenhum outro serviço no sistema é dono de "preferência do
+  usuário" (não existe um `user-service` — Keycloak cuida só de
+  identidade), esse dado fica no próprio `ai-service`. `apiKey` nunca é
+  devolvida em texto claro na resposta, só um booleano `configurado`.
+
+As tools MCP (tabela já em `ai-strategy.md` seção 4) ficaram de fora do
+contrato OpenAPI de propósito — MCP é um protocolo próprio, não REST; a
+spec cobre só a superfície voltada ao cliente web/mobile (chat,
+histórico, configuração).
+
+`docs/tasks.md` ganhou a seção da fatia 5 (item 1 = spec + confirmação
+do Qdrant, concluído; itens 2–10 = scaffold/Qdrant no compose/domínio/
+LlmProvider próprio/clientes de saída/RAG/agente orquestrador/REST/
+fechamento — backlog mais longo que as fatias anteriores, reflete a
+complexidade nova: primeiro serviço com vector store, chat, e agente).
+`docs/roadmap.md`: fatia 5 → 🔶 Em andamento. `overview.md`: linha do
+`ai-service` na tabela de serviços → 🔶 Em andamento.
+
+Criado: `docs/specs/ai-service.yaml`. Alterado:
+`docs/architecture/adr/0005-vector-store-qdrant.md` (Proposta → Aceita),
+`docs/architecture/ai-strategy.md` (nota de abertura), `docs/tasks.md`
+(fatia 5 detalhada), `docs/roadmap.md`, `docs/architecture/overview.md`
+(status do serviço).
+
+## 2026-08-10 — item 2: scaffold do ai-service
+
+Pedido: "pode seguir pro item 2".
+
+Mesmo padrão dos scaffolds anteriores (copiado de `document-service`
+dessa vez, não `card-service` — é o serviço mais parecido: sem MySQL,
+com MongoDB): `pom.xml`, `mvnw`/`mvnw.cmd`, Dockerfiles, `application.properties`
+(porta 8086), `.gitignore`/`.dockerignore`, `README.md`. `./mvnw compile`
+validado.
+
+Diferença mais notável em relação a todos os outros quatro serviços:
+`pom.xml` **sem** `quarkus-hibernate-orm`/`quarkus-hibernate-orm-panache`/
+`quarkus-jdbc-mysql`/`quarkus-flyway` — `ai-service` é o primeiro serviço
+do sistema sem banco relacional próprio (só MongoDB pro histórico de
+conversas + Qdrant pros embeddings, ver `overview.md`); também sem
+Kafka (não publica nem consome evento nessa fatia).
+
+Ajuste em relação ao plano do item 1: o cliente Qdrant, que a descrição
+original do item 2 previa entrar já no scaffold, ficou de fora do
+`pom.xml` por ora — vai entrar no item 7 (RAG), quando o código que
+realmente usa a dependência existir, mesmo critério já aplicado no
+scaffold do `document-service` (não adicionar dependência não usada
+ainda). Pelo mesmo motivo, `application.properties` só tem MongoDB +
+OIDC (sem service account — `ai-service` também só propaga token do
+usuário pros serviços que consulta, nunca client_credentials, mesmo
+padrão do `budget-service`/ADR-0026) + porta HTTP; os REST clients de
+saída (Ollama/OpenAI pro `LlmProvider`, e os quatro serviços das tools
+MCP) entram junto da implementação de cada um, itens 5 e 6.
+
+Criado: `services/ai-service/` (scaffold completo, sem
+domínio/persistência/REST ainda — próximo passo é o item 3 do backlog em
+`docs/tasks.md`, Qdrant no `docker-compose.yml`). Alterado:
+`docs/tasks.md` (item 2 concluído), `docs/architecture/overview.md`
+(status do serviço).
+
+## 2026-08-10 — item 3: Qdrant no docker-compose.yml
+
+Pedido: "pode seguir pro item 3".
+
+Serviço `qdrant` novo (`qdrant/qdrant:latest`), agrupado com os outros
+bancos no `docker-compose.yml` (junto de `mongo`, antes do `ollama`) —
+porta `6333` (REST + dashboard web em `/dashboard`) e `6334` (gRPC, o
+que o cliente Java vai usar quando o item 7 chegar), volume
+`qdrant-data` novo. Validado subindo de verdade: `docker compose up -d
+qdrant` → start limpo, log confirma HTTP na 6333 e gRPC na 6334,
+`curl http://localhost:6333/` devolveu 200 com a versão (`1.19.0`).
+
+`README.md`: duas linhas novas na tabela de URLs (dashboard + REST/gRPC)
+— `docs/architecture/interfaces-graficas.md` não foi tocado, porque já
+estava desatualizado antes desta sessão (nunca ganhou entradas de
+card-service/document-service/budget-service também — dívida
+pré-existente, fora do escopo de corrigir agora).
+
+Criado: nada em código ainda (só infra). Alterado: `docker-compose.yml`
+(serviço `qdrant` + volume), `README.md` (URLs), `docs/tasks.md` (item 3
+concluído).
+
+## 2026-08-10 — item 4: domínio e persistência do ai-service
+
+Pedido: "pode seguir pro item 4".
+
+`Conversa` (aggregate root) com `Mensagem` e `AcaoPendente` **embutidos**
+— nenhum dos dois tem coleção própria, ao contrário do split usado nos
+outros agregados MongoDB+MySQL deste sistema (ex.
+`DocumentoImportado`/`LancamentoPendente` no document-service). Faz
+sentido porque `ai-service` só tem MongoDB: "um documento por conversa,
+com o array de mensagens dentro" é literalmente o desenho canônico do
+banco pra esse tipo de dado, sem precisar de referência lógica entre
+coleções.
+
+Decisão nova, não estava em nenhum ADR/doc anterior: `AcaoPendente.propor()`
+fixa `expiraEm = agora + 10 minutos`. ADR-0007 só dizia "expira depois de
+um tempo curto" sem valor exato — 10 minutos foi a escolha feita agora
+(prazo curto o bastante pra não confirmar sobre contexto desatualizado,
+longo o bastante pra não expirar no meio de uma troca de mensagens
+normal). `Conversa.confirmarAcaoPendente(agora)` sempre limpa o estado
+depois de chamado, nos dois casos — sucesso (devolve a ação, quem chama
+executa a mutação de verdade) ou expirada (lança exceção, mas não deixa
+a proposta velha "pairando" pra tentar de novo).
+
+`ConfiguracaoIa` segue o molde de `Reserva` do budget-service (1
+documento por usuário, upsert, sem histórico), mas com uma diferença
+que puxou trabalho novo: `apiKey` da OpenAI precisa ficar criptografada
+no banco (`security.md` já documentava isso desde antes desta fatia
+começar — "Banco do ai-service, campo criptografado"). Criado
+`CriptografiaService` (AES-256/GCM, IV aleatório de 12 bytes por
+chamada, prefixado ao texto cifrado antes do Base64 — não precisa
+guardar o IV à parte). A chave vem de
+`ai-service.criptografia.chave`/`AI_SERVICE_CRIPTOGRAFIA_CHAVE`, com um
+default de dev gerado com `openssl rand -base64 32` (documentado como
+dev-only no comentário do `application.properties`, mesmo padrão das
+outras credenciais de dev já hardcoded no projeto, ex. `MYSQL_PASSWORD`).
+Achado de design ao encaixar isso na arquitetura: os mappers estáticos
+do projeto (`ConfiguracaoIaMapper`, sem construtor, só métodos
+`static`) não têm acesso a bean CDI — então a criptografia/descriptografia
+ficou no `ConfiguracaoIaRepositoryImpl` (que já é `@ApplicationScoped`
+com injeção), não no mapper; o mapper cuida só dos campos não sensíveis.
+
+24 testes (`ConversaTest`, `AcaoPendenteTest`, `ConfiguracaoIaTest`,
+`CriptografiaServiceTest` — inclui um teste específico garantindo que o
+mesmo texto plano gera criptografados diferentes a cada chamada, prova
+de que o IV está sendo randomizado de verdade, não reaproveitado).
+`./mvnw test` verde. Sem teste de integração de banco ainda — mesmo
+padrão já usado nos outros serviços com Mongo, fica pro item 9 (REST).
+
+Criado: `services/ai-service/src/main/java/.../domain/` (`AutorMensagem`,
+`TipoRespostaAgente`, `Mensagem`, `TipoTransacao`, `FrequenciaRecorrencia`,
+`AcaoPendente`, `Conversa`, `ConversaNaoEncontradaException`,
+`NenhumaAcaoPendenteException`, `AcaoPendenteExpiradaException`,
+`ConversaRepository`, `ProvedorIa`, `ConfiguracaoIa`,
+`ConfiguracaoIaRepository`), `.../infrastructure/persistence/`
+(`ConversaEntity`/`MensagemEmbedded`/`AcaoPendenteEmbedded`/`Mapper`/
+`MongoRepository`/`RepositoryImpl`, `ConfiguracaoIaEntity`/`Mapper`/
+`MongoRepository`/`RepositoryImpl`), `.../infrastructure/security/`
+(`CriptografiaService`), testes. Alterado:
+`services/ai-service/src/main/resources/application.properties`
+(chave de criptografia), `docs/tasks.md` (item 4 concluído).
+
+## 2026-08-10 — item 5: LlmProvider e adapters do ai-service
+
+Pedido: "pode seguir pro item 5".
+
+Porta `LlmProvider` (cópia própria do `ai-service`, mesma forma da porta
+já usada no `document-service` — `chat()`/`isConfigured()` — com
+`embed()` a mais, porque esse serviço precisa de RAG e o document-service
+não precisava). Dois adapters: `OllamaLlmProvider` (copiado quase
+literalmente do document-service, incluindo o timeout generoso de 120s
+já validado na prática contra inferência local em CPU) e
+`OpenAiLlmProvider` (novo — `/v1/chat/completions` e `/v1/embeddings`,
+modelo `gpt-4o-mini`/`text-embedding-3-small`).
+
+Achado de design real ao encaixar "cada usuário escolhe o seu provedor"
+(ADR-0002) na porta documentada em `ai-strategy.md`, que não tem
+parâmetro de config em `chat()`/`embed()`: se `LlmProvider` fosse bean
+CDI fixo (padrão de todos os outros adapters do projeto até agora), não
+teria como saber de qual usuário é a chamada. Resolvido com uma porta
+nova, `LlmProviderFactory` (não estava prevista em nenhum ADR/doc
+anterior) — recebe a `ConfiguracaoIa` do usuário e devolve um
+`LlmProvider` já resolvido pro provedor/credencial certos, uma vez por
+chamada. Consequência: `OllamaLlmProvider`/`OpenAiLlmProvider` **não são
+bean CDI** — são instanciados via `new` dentro da factory, carregando o
+estado resolvido (apiKey da OpenAI, modelo do Ollama). Os REST clients
+em si continuam CDI (`@RestClient OllamaRestClient`/`OpenAiRestClient`
+injetados na própria factory), porque as base URLs deles são fixas — só
+a apiKey da OpenAI muda por chamada, e isso é só um header
+(`Authorization: Bearer ...`), não precisa de client dinâmico.
+`ProvedorNaoConfiguradoLlmProvider` (null object) cobre `ProvedorIa.NENHUM`
+— lança `IaNaoConfiguradaException` se algo tentar chamar `chat()`/
+`embed()` sem provedor configurado (422 na spec).
+
+Simplificação consciente, registrada pra não esquecer: `ConfiguracaoIa.ollamaUrl`
+(URL de Ollama customizada por usuário — já aceita pela spec) ainda não
+é usada de verdade pelo `OllamaLlmProvider`, que sempre aponta pra
+instância default do `application.properties`. Dar suporte a URL
+customizada por usuário exigiria construir o REST client
+dinamicamente por chamada (`RestClientBuilder` programático em vez do
+client CDI fixo) — decidido não adiantar essa complexidade sem
+necessidade real ainda.
+
+6 testes novos: `LlmProviderFactoryImplTest` (a lógica de dispatch por
+`ProvedorIa` É testada, diferente dos adapters — não é "thin HTTP
+adapter", é decisão real que pode ter bug) e
+`ProvedorNaoConfiguradoLlmProviderTest`. Sem teste dedicado pros dois
+adapters (mesmo critério já estabelecido no projeto desde o
+`OllamaLlmProvider` do document-service — thin adapter, mockado nos
+testes de quem usa a porta, nunca testado contra o provedor real em
+CI). 30 testes no total do `ai-service`, `./mvnw test` verde.
+
+Criado: `services/ai-service/src/main/java/.../domain/` (`ChatRequest`,
+`ChatResponse`, `EmbeddingResult`, `LlmProvider`, `LlmProviderFactory`,
+`IaNaoConfiguradaException`), `.../infrastructure/llm/` (`OllamaRestClient`/
+`OllamaLlmProvider`, `OpenAiRestClient`/`OpenAiLlmProvider`,
+`ProvedorNaoConfiguradoLlmProvider`, `LlmProviderFactoryImpl`, `dto/`
+com os DTOs do Ollama e da OpenAI) + testes. Alterado:
+`services/ai-service/src/main/resources/application.properties`
+(config de Ollama/OpenAI), `docs/tasks.md` (item 5 concluído).
+
+## 2026-08-10 — item 6: clientes de saída do ai-service
+
+Pedido: "pode seguir pro item 6".
+
+Três portas (`BudgetServiceClient`, `CardServiceClient`,
+`TransactionServiceClient`) + REST clients, cobrindo quatro das cinco
+tools MCP documentadas em `ai-strategy.md` (a quinta, `buscar_transacoes`
+com busca semântica, fica pro item 7 — RAG/Qdrant).
+
+Achado ao implementar `buscar_saldo_disponivel`: a tabela de
+`ai-strategy.md` (escrita em 2026-08-06, antes do `budget-service`
+existir) dizia que essa tool chama "budget-service + account-service".
+Na prática, `GET /disponivel-para-gastar` do `budget-service` **já**
+devolve o valor pronto (ele mesmo agrega saldo de conta internamente,
+ADR-0026) — não tem motivo pro `ai-service` chamar `account-service` de
+novo pra um dado que o `budget-service` já buscou. Resultado: **nenhum**
+`AccountServiceClient` neste serviço, ajuste registrado explicitamente
+em `docs/tasks.md` pra não parecer omissão.
+
+Mesmo padrão de simplicidade do `budget-service` (item 4 daquela
+fatia): um `PropagarAutorizacaoHeadersFactory` só, compartilhado pelos
+três REST clients — nenhum dos cinco endpoints chamados
+(`GET /disponivel-para-gastar`, `GET /cartoes`,
+`GET /cartoes/{id}/faturas`, `GET /transacoes`,
+`GET /transacoes/resumo-por-categoria`, `POST /transacoes`,
+`POST /transacoes-recorrentes`) exige confirmação de posse — todos já
+filtram pelo `sub` do token propagado.
+
+`TransactionServiceClient.criarTransacao`/`criarTransacaoRecorrente` são
+os dois únicos métodos de escrita de toda a fatia até agora — existem
+só como capacidade do cliente; a responsabilidade de só chamá-los depois
+de confirmação explícita do usuário (ADR-0007) fica pro agente
+orquestrador (item 8), não faz parte deste item.
+
+Sem teste dedicado pros três `*ClientImpl` — mesmo critério já
+estabelecido no projeto (thin adapter HTTP, mockado nos testes de quem
+usa a porta). `./mvnw compile`/`test` validados, 30 testes continuam
+verdes.
+
+Criado: `services/ai-service/src/main/java/.../domain/`
+(`DisponivelParaGastar`, `BudgetServiceClient`, `StatusFatura`,
+`Cartao`, `Fatura`, `CardServiceClient`, `ResumoCategoria`, `Transacao`,
+`CriarTransacaoComando`, `CriarTransacaoRecorrenteComando`,
+`TransactionServiceClient`), `.../infrastructure/client/`
+(`PropagarAutorizacaoHeadersFactory`, `BudgetServiceRestClient`/
+`ClientImpl`, `CardServiceRestClient`/`ClientImpl`,
+`TransactionServiceRestClient`/`ClientImpl`, `dto/`). Alterado:
+`services/ai-service/src/main/resources/application.properties`
+(REST clients de budget/card/transaction-service), `docs/tasks.md`
+(item 6 concluído).
+
+## 2026-08-10 — item 7: RAG (Qdrant) do ai-service
+
+Pedido: "pode seguir pro item 7".
+
+Achado real logo no início, fora do escopo original do item: o payload
+de `TransacaoRegistradaEvento` (publicado em `transacao.eventos` pelo
+`transaction-service` desde a fatia 1) não carregava `descricao` nem
+`categoria` — só id/contaId/usuarioId/tipo/valor/data. RAG é
+especificamente sobre indexar *descrição* de transação
+(ai-strategy.md seção 2, "'gastos com mercado' deve encontrar transações
+com descrição 'Supermercado Pão de Açúcar'") — sem o campo, não tinha o
+que indexar. Adicionados os dois campos ao evento e ao publisher.
+Confirmado antes de mexer que nenhum consumidor desse tópico existia
+ainda (só o `transaction-service` publicava, ninguém ouvia) — mudança
+puramente aditiva, sem consumidor pra quebrar; suite de 102 testes do
+`transaction-service` continuou verde depois.
+
+Decisão de design nova ao encaixar RAG na arquitetura de múltiplos
+provedores (ADR-0002): **embedding sempre usa Ollama local**,
+independente do provedor de *chat* que o usuário escolheu.
+`LlmProviderFactory` ganhou um método novo, `criarParaEmbedding()`,
+sempre devolvendo Ollama. Motivo concreto: `nomic-embed-text` (Ollama)
+gera vetor de 768 dimensões, `text-embedding-3-small` (OpenAI) gera
+1536 — uma coleção do Qdrant tem dimensão fixa, então indexar com o
+provedor de cada usuário quebraria a coleção na primeira busca cruzando
+usuários com provedores diferentes. Efeito colateral bom: indexação não
+depende de `ConfiguracaoIa` — toda transação é indexada assim que é
+criada, mesmo pra quem nunca configurou IA ainda (dado já fica pronto
+pra quando configurar).
+
+Pipeline completo: `transaction-service` publica → `TransacaoRegistradaConsumer`
+(primeiro consumer real desse tópico) → `IndexarTransacaoUseCase` (embed
++ indexa no Qdrant). `BuscarTransacoesSimilaresUseCase` é o lado de
+consulta, usado pela tool `buscar_transacoes` no item 8 — sempre filtra
+por `usuarioId` na busca (isolamento multi-tenant, ADR-0003, mesma regra
+de todo o resto do sistema).
+
+`QdrantVectorStoreImpl` fala REST puro com o Qdrant — decisão
+consciente de não usar um client Java dedicado (não verificado/confiável
+sem acesso à internet pra conferir Maven coordinates certas; REST puro é
+o mesmo padrão já usado com Ollama/OpenAI/os quatro outros serviços, sem
+introduzir dependência nova arriscada). Contrato da API (criar coleção
+`PUT /collections/{nome}`, upsert `PUT .../points`, busca
+`POST .../points/search` com filtro por `usuarioId`, 404 de coleção
+inexistente) validado na prática com `curl` direto contra o container
+Qdrant já rodando desde o item 3 — os três fluxos (criar, indexar,
+buscar) responderam exatamente como os DTOs esperavam, sem surpresa.
+`QdrantColecaoInicializador` cria a coleção sozinho no startup se não
+existir (idempotente).
+
+9 testes novos: `IndexarTransacaoUseCaseTest`,
+`BuscarTransacoesSimilaresUseCaseTest`, `TransacaoRegistradaConsumerTest`
+(mapeamento evento→comando, mesmo padrão do
+`DocumentoLancamentosConfirmadosConsumerTest` já usado no
+transaction-service), `LlmProviderFactoryImplTest` ganhou um caso pro
+`criarParaEmbedding()`. Sem teste dedicado pro `QdrantVectorStoreImpl` —
+thin HTTP adapter, validado hoje via `curl` real em vez de mock, mesmo
+critério já estabelecido no projeto pra esse tipo de classe. 34 testes
+no total do `ai-service`, `./mvnw test` verde.
+
+Criado: `services/ai-service/src/main/java/.../domain/`
+(`RegistroIndexado`, `ResultadoBusca`, `VectorStore`),
+`.../application/` (`IndexarTransacaoComando`/`UseCase`,
+`BuscarTransacoesSimilaresUseCase`), `.../infrastructure/messaging/`
+(`TransacaoRegistradaEvento`, `TransacaoRegistradaDeserializer`,
+`TransacaoRegistradaConsumer`), `.../infrastructure/vectorstore/`
+(`QdrantRestClient`, `QdrantVectorStoreImpl`,
+`QdrantColecaoInicializador`, `dto/`) + testes. Alterado:
+`services/transaction-service/.../TransacaoRegistradaEvento.java`
+(campos `descricao`/`categoria`),
+`services/transaction-service/.../TransacaoEventPublisherImpl.java`,
+`services/ai-service/pom.xml` (Kafka), `application.properties` (Kafka +
+Qdrant), `docs/tasks.md` (item 7 concluído).
+
+## 2026-08-10 — item 8: agente orquestrador do ai-service
+
+Pedido: "pode seguir pro item 8" — o item mais complexo da fatia.
+
+Achado real logo no início: `AcaoPendente` (item 4) não tinha campo
+`descricao`, mas `criar_transacao` do transaction-service exige esse
+campo — sem ele a ação confirmada não tinha o que executar. Adicionado
+`AcaoPendente.descricao` (domínio + persistência + os testes do item 4
+já existentes, todos revalidados depois da mudança).
+
+`AgenteOrquestradorUseCase` — um caso de uso só pra tudo que acontece na
+conversa (pergunta, ação, correção, confirmação), consistente com o
+`POST /chat` único já decidido na spec (item 1). Decisões de design
+tomadas ao montar o fluxo, nenhuma prevista em ADR anterior:
+
+- Confirmação detectada por palavra-chave (conjunto fixo de frases,
+  case-insensitive), não por outra chamada ao LLM — mais simples e sem
+  mais um ponto de falha de JSON malformado pra uma decisão binária.
+- Correção tratada como comando novo (limpa a proposta antiga,
+  reclassifica a mensagem do zero) em vez de um "diff" com estado da
+  proposta anterior — mesmo resultado observável que `ai-strategy.md`
+  seção 4.2 descreve, com bem menos complexidade de estado.
+- `descricao` sempre vem do LLM; `contaId` nunca — é sempre resolvido em
+  código Java determinístico contra `AccountServiceClient` (match por
+  substring), nunca um UUID inventado pelo modelo. Isso trouxe de volta
+  `AccountServiceClient` pro `ai-service` (tinha sido descartado no item
+  6, que só cobria as tools de leitura — a necessidade real só apareceu
+  aqui, no fluxo de escrita, pra resolver "conta corrente" → UUID).
+- A resposta final de toda consulta é montada em template Java, nunca
+  pelo LLM — o número exato vem de chamada determinística a um serviço
+  e é só formatado; o LLM decide qual tool chamar e quais parâmetros
+  extrair, nunca escreve o texto com o número final (PRD: "nunca
+  inventada").
+
+Bug real encontrado escrevendo o teste de "ação expirada", corrigido
+antes de qualquer commit: a condição original só entrava no fluxo de
+confirmação quando `temAcaoPendenteValida()` — isso excluía justamente
+uma proposta **expirada**, que caía num "não entendi" genérico em vez de
+avisar que expirou. Corrigido pra checar só a presença da ação
+(`getAcaoPendente() != null`), deixando `Conversa.confirmarAcaoPendente`
+decidir validade — o catch de `AcaoPendenteExpiradaException` (que
+existia desde o item 4) virou alcançável de verdade só agora.
+
+**Prompts testados contra o Ollama real via `curl`** — mesmo cuidado que
+o `AgenteExtracaoFaturaService` do document-service teve (nunca confiar
+só na teoria pra prompt de LLM, `docs/historico.md` 2026-08-09):
+- Classificação de intent acertou de primeira: pergunta de saldo →
+  `{"intent":"CONSULTA","tool":"buscar_saldo_disponivel","periodo":"MES_ATUAL"}`.
+- Extração de ação, na primeira versão do prompt, confundiu `descricao`
+  com o texto da conta — comando "...na conta corrente" virou
+  `descricao: "Conta Corrente"` em vez de algo sobre a despesa em si.
+  Prompt corrigido com instrução explícita ("NUNCA repita esse valor em
+  descricao") e revalidado contra o Ollama de novo: passou a extrair
+  "Aluguel" — um palpite plausível pro contexto (o comando de teste não
+  mencionava nenhuma descrição real), aceitável porque é exatamente pra
+  isso que existe a confirmação (ADR-0007) — o usuário vê o resumo
+  completo antes de qualquer coisa persistir, e pode recusar/corrigir se
+  o palpite estiver errado.
+- Pergunta comparativa ("gastei mais que o mês passado?") fez o modelo
+  devolver um período inválido, dois valores concatenados numa string só
+  (`"MES_ATUAL,MES_PASSADO"`) — o parsing defensivo já tinha fallback
+  pra isso (`PeriodoReferencia` desconhecido → `MES_ATUAL`), não quebrou
+  nada. Aproveitado o achado pra melhorar de verdade
+  `responderResumoCategoria`: passou a somar `totalGastoPeriodoAnterior`
+  (campo que o `transaction-service` já calculava por categoria, mas a
+  resposta não usava) e responder "maior"/"menor" que o período anterior
+  diretamente — sem pedir nenhuma aritmética ao LLM, mesma lição já
+  aprendida no `document-service`.
+
+16 testes novos em `AgenteOrquestradorUseCaseTest`: as quatro tools de
+consulta (incluindo o teste novo de comparação com período anterior),
+proposta de ação com conta resolvida, pedido de conta quando não
+identificada, extração incompleta (pede reformulação), intent
+desconhecida, confirmação de ação pontual e recorrente, proposta
+expirada (com a correção do bug acima), correção limpando a proposta
+anterior antes de reclassificar, e isolamento de conversa por usuário
+(mesmo erro nos dois casos — id inexistente ou de outro usuário — evita
+IDOR). 51 testes no total do `ai-service`, `./mvnw test` verde.
+
+Criado: `services/ai-service/src/main/java/.../domain/` (`Conta`,
+`AccountServiceClient`, `Intencao`, `ToolConsulta`, `PeriodoReferencia`),
+`.../application/` (`ChatComando`, `RegistroTrace`, `ChatResultado`,
+`AgenteOrquestradorUseCase`), `.../infrastructure/client/`
+(`AccountServiceRestClient`/`ClientImpl`, `dto/ContaDto`),
+`.../infrastructure/agent/dto/` (`IntencaoDetectadaDto`,
+`AcaoExtraidaDto`) + testes. Alterado:
+`services/ai-service/src/main/java/.../domain/AcaoPendente.java`
+(campo `descricao`), `.../infrastructure/persistence/AcaoPendenteEmbedded.java`,
+`.../infrastructure/persistence/ConversaMapper.java`,
+`src/test/.../domain/AcaoPendenteTest.java`,
+`src/test/.../domain/ConversaTest.java` (assinatura nova de
+`AcaoPendente.propor`), `application.properties` (REST client
+account-service), `docs/tasks.md` (item 8 concluído).
+
+## 2026-08-10 — item 9: REST do ai-service (fecha a implementação)
+
+Pedido: "pode seguir pro item 9".
+
+Três resources em `infrastructure/rest/`: `ChatResource`
+(`POST /chat`), `ConversaResource` (`GET /conversas`,
+`GET /conversas/{id}`), `ConfiguracaoResource`
+(`GET/PUT /configuracao`) — mesmo molde do resto do projeto
+(`usuarioIdAutenticado()` extrai `sub` do JWT, DTOs de resposta com
+`static de(...)`). Spec ganhou o campo `descricao` em `AcaoProposta`,
+que não existia quando a spec foi escrita no item 1 — só apareceu
+quando o domínio ganhou esse campo no item 8.
+
+Achado de nomenclatura, não um problema de verdade: os DTOs REST
+`ChatRequest`/`ChatResponse` (o que o cliente web/mobile manda/recebe)
+têm o mesmo nome dos `ChatRequest`/`ChatResponse` do domínio (o que o
+`LlmProvider` usa internamente pra falar com Ollama/OpenAI) — sem
+colisão real porque vivem em pacotes diferentes
+(`infrastructure.rest.dto` vs `domain`) e nenhum arquivo precisa
+importar os dois ao mesmo tempo.
+
+Quatro casos de uso novos, pequenos, seguindo o padrão já estabelecido
+desde a fatia 2 (`BuscarCartaoUseCase` pro anti-IDOR,
+`DefinirReservaUseCase` pro upsert): `ListarConversasUseCase`,
+`BuscarConversaUseCase`, `BuscarConfiguracaoIaUseCase`,
+`DefinirConfiguracaoIaUseCase`.
+
+Achado real rodando o primeiro teste de integração completo do
+`ai-service` (`@QuarkusTest` sobe a aplicação inteira, incluindo o
+`QdrantColecaoInicializador` do item 7, que até agora só tinha sido
+exercido por testes unitários com mock): o REST client do Quarkus lança
+`org.jboss.resteasy.reactive.ClientWebApplicationException` pra
+qualquer erro HTTP, **não** `jakarta.ws.rs.NotFoundException`
+especificamente — o `catch (NotFoundException e)` escrito no item 7
+nunca teria disparado de verdade contra o Qdrant real, só não tinha
+sido pego antes porque nenhum teste subia a aplicação completa até
+agora. Corrigido pra `catch (WebApplicationException e)` + checar
+`e.getResponse().getStatus() == 404` manualmente — mais robusto, não
+depende de qual subtipo exato de exceção o client decide lançar pra
+cada status.
+
+Exception mapper novo: `IllegalArgumentExceptionMapper` (400) — cobre
+validação de campo cruzado que o Bean Validation da request não
+expressa sozinho (`apiKey` obrigatória só se `provedor=OPENAI`,
+regra que já vivia em `ConfiguracaoIa.validarProvedor` desde o item 4,
+mas sem esse mapper viraria 500 em vez de 400).
+
+13 testes de integração novos: `ChatResourceTest` (consulta de ponta a
+ponta com todos os clientes mockados via `QuarkusMock` — mesmo padrão
+do `CartaoResourceTest` do card-service —, 400/404/401),
+`ConversaResourceTest` (sem endpoint de criação direta, a conversa de
+teste é criada via `POST /chat` de verdade antes de listar/buscar;
+isolamento por usuário confirmado), `ConfiguracaoResourceTest`
+(confirma que `apiKey` nunca aparece na resposta, mesmo depois de
+definida). 64 testes no total do `ai-service` — **fecha a
+implementação da fatia 5** (só falta o item 10:
+docker-compose/CI/Keycloak/Postman/diagramas).
+
+Criado: `services/ai-service/src/main/java/.../application/`
+(`ListarConversasUseCase`, `BuscarConversaUseCase`,
+`BuscarConfiguracaoIaUseCase`, `DefinirConfiguracaoIaComando`/`UseCase`),
+`.../infrastructure/rest/` (`ChatResource`, `ConversaResource`,
+`ConfiguracaoResource`, `ConversaNaoEncontradaExceptionMapper`,
+`IaNaoConfiguradaExceptionMapper`, `ConstraintViolationExceptionMapper`,
+`IllegalArgumentExceptionMapper`, `dto/` — `ChatRequest`, `ChatResponse`,
+`AcaoProposta`, `ToolInvocada`, `ConversaResumo`,
+`ConversaDetalheResponse`, `MensagemConversa`, `ConfiguracaoIaRequest`,
+`ConfiguracaoIaResponse`, `ErroResponse`, `ErroValidacaoResponse`) +
+testes de integração. Alterado:
+`services/ai-service/.../infrastructure/vectorstore/QdrantColecaoInicializador.java`
+(catch corrigido), `docs/specs/ai-service.yaml` (campo `descricao` em
+`AcaoProposta`), `docs/tasks.md` (item 9 concluído).
+
+## 2026-08-10 — item 10: fecha a fatia 5 (docker-compose, CI, Keycloak, Postman, diagramas)
+
+Pedido: "pode seguir pro item 10" — mesmo padrão de fechamento já usado no
+item 11 da fatia 3 (`document-service`) e no item 7 da fatia 4
+(`budget-service`).
+
+`docker-compose.yml` ganhou o serviço `ai-service` (depende de mongo/
+qdrant/kafka/ollama/account-service/budget-service/card-service/
+transaction-service, porta 8086). Diferente das fatias anteriores, o
+`Dockerfile.jvm` precisa do `target/quarkus-app/` já compilado — rodei
+`./mvnw package -B -DskipTests` no `ai-service` antes do
+`docker compose up -d --build ai-service` (o build direto do compose
+falhou primeiro, "target/quarkus-app/lib: not found", até eu perceber
+que faltava esse passo — não é diferente de como os outros serviços já
+funcionam, só não tinha ficado óbvio até agora porque os builds
+anteriores desta sessão sempre reaproveitaram uma imagem já buildada).
+Subida validada de verdade: build limpo, `GET /q/health` → 200 (Mongo,
+Kafka consumer de `transacao.eventos` e o próprio `ai-service` todos
+UP), log confirmou `QdrantColecaoInicializador` reconhecendo a coleção
+"transacoes" já existente em vez de tentar recriar — validação real do
+fix de item 9 (catch de `WebApplicationException`) contra o Qdrant de
+verdade, não só via `@QuarkusTest`.
+
+Keycloak: client `ai-service` registrado com `bearerOnly: true`, **sem**
+service-account — mesmo motivo do `budget-service`/`document-service`:
+`ai-service` só propaga o token do próprio usuário pros serviços que
+chama, nunca client_credentials. Aplicado no realm já importado no
+container rodando (`kcadm.sh create clients`) e testado de ponta a
+ponta: token real emitido pro `usuario.teste` via `password grant`,
+`GET /api/v1/configuracao` e `GET /api/v1/conversas` retornaram 200
+contra o container recém-subido (sem token, 401 — confirmando que o
+`RolesAllowed("usuario")` está mesmo ativo).
+
+CI: job `ai-service` novo em `ci.yml`, mesmo template dos outros cinco
+(testes + cobertura JaCoCo + build de imagem Docker de validação + OWASP
+Dependency-Check), `ai-service` adicionado ao filtro de paths do job
+`changes`.
+
+Postman: os 5 endpoints do `ai-service` documentados em
+`mudancas-manuais.txt` (`POST /chat` com um exemplo de body pra cada
+fluxo — consulta, propor ação, confirmar, corrigir —, `GET /conversas`,
+`GET /conversas/{id}`, `GET/PUT /configuracao` com exemplo pra Ollama e
+OpenAI) + `ai_service_url` no environment.
+
+Documentação viva atualizada pra refletir a fatia entregue: `diagrams.md`
+(container graph sem mais "(planejado)" no `ai-service` nem "proposto"
+no Qdrant; arestas síncronas novas pros quatro serviços consultados +
+aresta Kafka nova de `transacao.eventos` pro `ai-service`, indexação
+RAG; seção 3.6 nova com o ER conceitual de `Conversa`/`Mensagem`/
+`AcaoPendente`/`ConfiguracaoIa` — `Mensagem`/`AcaoPendente` embutidos,
+não coleções próprias; seção 4.7 nova com o diagrama de classes do
+domínio, incluindo os ports `LlmProvider`/`LlmProviderFactory`/
+`VectorStore`; índice de fluxos da seção 6 atualizado); `overview.md`
+(tabela de serviços → ✅ Entregue; seção 4 reescrita pra bater com a
+implementação real — endpoint único decidindo intenção por texto+estado,
+confirmação por casamento de palavra-chave em vez de outra chamada ao
+LLM, resposta de consulta sempre montada por template Java — e subseção
+4.3 nova com o fluxo de indexação RAG via Kafka); `roadmap.md` (fatia 5
+→ ✅ Entregue, próxima ação aponta pra fatia 6, front-end); `README.md`
+raiz (parágrafo do `ai-service` no "Estado atual", tabela de endpoints,
+URLs — REST/Swagger/MongoDB compartilhado com document-service —,
+contagem de serviços no CI/docker compose de cinco pra seis, e o bullet
+de stack sobre IA ajustado: tirei a menção a "MCP" porque a
+implementação real do agente orquestrador usa tools internas resolvidas
+em Java, não expõe de fato o protocolo MCP — `ai-strategy.md` descreve
+isso como visão, não foi revisitado nesta fatia, então o README não
+devia prometer mais do que existe).
+
+Isso fecha a fatia 5 do roadmap — `ai-service` entregue de ponta a
+ponta: spec (item 1) → ADR-0005 confirmado → scaffold (item 2) → Qdrant
+(item 3) → domínio/persistência (item 4) → `LlmProvider`/adapters (item
+5) → clientes de saída (item 6) → RAG (item 7) → agente orquestrador
+(item 8) → REST (item 9) → infra/CI/documentação (item 10). 64 testes,
+CI configurado, container validado contra a stack real (Mongo, Kafka,
+Qdrant, Keycloak — todos de verdade, não mock).
+
+Alterado: `docker-compose.yml`, `infra/keycloak/realm-financas.json`,
+`.github/workflows/ci.yml`, `docs/postman/mudancas-manuais.txt`,
+`docs/postman/financas-dev.postman_environment.json`,
+`docs/architecture/diagrams.md`, `docs/architecture/overview.md`,
+`docs/roadmap.md`, `README.md`, `docs/tasks.md` (item 10, fatia 5
+fechada).
