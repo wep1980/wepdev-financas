@@ -29,13 +29,14 @@ serviço separado — esse papel foi absorvido pelo Next.js (ver ADR-0006).
 
 ## 2.1 Clientes
 
-| Cliente | Framework | Fala com os serviços via | Entrada de comando IA |
-|---|---|---|---|
-| Web | Next.js (React) | Server Components/Route Handlers do próprio Next.js, que agregam os microsserviços (papel de BFF) — ver ADR-0006 | Só texto |
-| Mobile | React Native | Chama os microsserviços diretamente (sem BFF — não há processo Next.js no dispositivo). Se a agregação client-side ficar repetitiva entre web e mobile, revisitar com um ADR (ex: gateway HTTP dedicado) — não antecipar essa complexidade agora | Texto ou voz (transcrita no dispositivo, nunca enviada como áudio — ADR-0008) |
+| Cliente | Framework | Porta | Fala com os serviços via | Entrada de comando IA | Status |
+|---|---|---|---|---|---|
+| Web | Next.js (React) | 3000 | Server Components/Route Handlers do próprio Next.js, que agregam os microsserviços (papel de BFF) — ver ADR-0006 | Só texto | ✅ Entregue — dashboard, CRUD conta/transação/cartão, upload de documento, chat com IA, login via Keycloak (Auth.js, ADR-0027), 52 testes, CI verde |
+| Mobile | React Native | — | Chama os microsserviços diretamente (sem BFF — não há processo Next.js no dispositivo). Se a agregação client-side ficar repetitiva entre web e mobile, revisitar com um ADR (ex: gateway HTTP dedicado) — não antecipar essa complexidade agora | Texto ou voz (transcrita no dispositivo, nunca enviada como áudio — ADR-0008) | Planejado |
 
-UX, identidade visual, tipografia e paleta de cores ainda não foram
-definidos — ficam para quando começarmos a fatia de front-end (roadmap #6).
+Identidade visual, tipografia e paleta de cores do Web já definidas em
+`docs/architecture/design-system.md` (fatia 6, item 8). Mobile ainda sem
+UX/estilo definido — fica pra quando começar a fatia de mobile (roadmap #7).
 
 ## 3. Fluxo: ingestão de documento → transação
 

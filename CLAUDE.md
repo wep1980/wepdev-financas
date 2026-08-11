@@ -28,6 +28,7 @@ Detalhes completos: [`docs/product/prd.md`](docs/product/prd.md).
 | `docs/architecture/diagrams.md` | Diagrama de contexto, de containers/serviços, modelo de domínio e implantação — visão estrutural do todo |
 | `docs/architecture/deployment.md` | Ambiente de dev (Windows) e produção (servidor Linux único do usuário, já com outro site exposto) |
 | `docs/architecture/interfaces-graficas.md` | Todo painel/console web disponível (Keycloak, Kafka UI, Grafana, Prometheus, Swagger UI) — URLs de dev e padrão de produção |
+| `docs/architecture/ollama-servidor-guia.md` | Como usar o Ollama compartilhado do servidor (GPU dedicada, ADR-0029) — API, timeouts, limites de concorrência, regras de segurança, pra este e outros sistemas |
 | `docs/architecture/security.md` | Gestão de segredos, inventário de credenciais do sistema, transporte, logging — política central de "nunca expor credencial" |
 | `docs/specs/*.yaml` | Contratos OpenAPI de cada serviço (spec-driven: spec antes do código) |
 | `docs/roadmap.md` | Fatias verticais, em ordem, com status |

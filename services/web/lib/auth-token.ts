@@ -7,18 +7,32 @@ import { precisaRenovar, renovarToken } from "@/lib/auth-token-refresh";
 /**
  * Lê o JWT (cookie httpOnly) direto, sem passar pelo endpoint público
  * /api/auth/session — accessToken/idToken nunca são expostos ali de
- * propósito (ver auth.ts, callback session). secureCookie replica a
- * regra do próprio Auth.js (useSecureCookies = protocolo https) — dev
- * é sempre http, produção sempre https via Cloudflare Tunnel
- * (ADR-0019), então NODE_ENV é um proxy confiável pros dois ambientes
- * reais deste projeto.
+ * propósito (ver auth.ts, callback session).
+ *
+ * `secureCookie` decide o NOME do cookie que getToken() procura
+ * (`__Secure-authjs.session-token` vs `authjs.session-token` sem
+ * prefixo) — precisa bater exatamente com o que o próprio Auth.js usou
+ * pra SETAR o cookie, que é decidido pelo protocolo real da requisição
+ * (`url.protocol === "https:"`, ver @auth/core/src/lib/init.ts), nunca
+ * por `NODE_ENV`. Achado real rodando o container de produção pela
+ * primeira vez (fatia 6, fechamento — 2026-08-11): a imagem Docker tem
+ * `NODE_ENV=production` fixo (Dockerfile), mas em dev local via
+ * docker-compose o protocolo continua http (só produção real, atrás do
+ * Cloudflare Tunnel — ADR-0019 — é https); usar `NODE_ENV` pra decidir
+ * o nome do cookie fazia essa função nunca achar o cookie certo dentro
+ * do container, devolvendo `null` sempre, apesar da sessão existir de
+ * verdade (confirmado comparando com `auth()`, que decodifica o mesmo
+ * cookie corretamente porque usa o protocolo real, não `NODE_ENV`).
+ * Corrigido tentando os dois nomes em vez de adivinhar por variável de
+ * ambiente — funciona em dev, atrás do Cloudflare Tunnel e em qualquer
+ * outra topologia futura, sem depender de header de proxy específico.
  */
 async function obterTokenBruto(): Promise<JWT | null> {
-  return getToken({
-    req: { headers: await headers() } as never,
-    secret: process.env.AUTH_SECRET,
-    secureCookie: process.env.NODE_ENV === "production",
-  });
+  const params = { req: { headers: await headers() } as never, secret: process.env.AUTH_SECRET };
+  return (
+    (await getToken({ ...params, secureCookie: true })) ??
+    (await getToken({ ...params, secureCookie: false }))
+  );
 }
 
 /**
@@ -48,7 +62,10 @@ const obterTokenAtualizado = cache(async (): Promise<JWT | null> => {
   try {
     const renovado = await renovarToken(
       token.refreshToken,
-      process.env.AUTH_KEYCLOAK_ISSUER!,
+      // Chamada de servidor — precisa do endpoint interno (alcançável de
+      // dentro do container), não do issuer público do navegador. Ver
+      // auth.ts.
+      process.env.AUTH_KEYCLOAK_INTERNAL_ISSUER ?? process.env.AUTH_KEYCLOAK_ISSUER!,
       process.env.AUTH_KEYCLOAK_ID!
     );
     return {

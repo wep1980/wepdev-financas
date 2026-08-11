@@ -67,6 +67,27 @@ multi-nó), acessado via SSH. Levantamento real feito em 2026-08-07:
   rede Docker interna (`financas-net`), do jeito que os outros projetos do
   próprio usuário já fazem com Postgres/Umami.
 
+**Atualização 2026-08-11 — GPU dedicada instalada (ADR-0029)**: o
+servidor ganhou uma placa **RTX 5070 Ti (16GB GDDR7)**, movida de outra
+máquina do usuário, especificamente pra rodar o Ollama sem a contenção
+que CPU-only causava entre chat e extração de fatura (detalhe completo
+em ADR-0029 e `docs/historico.md`). Mudanças físicas/de sistema:
+- Disco de sistema (SSD NVMe) realocado de uma placa adaptadora PCIe pro
+  slot M.2 nativo da placa-mãe (**ASUS TUF B360M-PLUS GAMING/BR**, i7-8700,
+  6 núcleos/12 threads) — liberou o slot PCIe x16 pra GPU. Boot
+  confirmado usando UUID/LVM (não caminho físico), troca de slot não
+  quebrou nada.
+- Driver NVIDIA `580.173.02` (open kernel module) + NVIDIA Container
+  Toolkit instalados — `docker run --gpus all` funcionando.
+- Ollama roda como container avulso no servidor (`docker run`, fora de
+  qualquer `docker-compose.yml` por ora — ver "Pendente" na ADR-0029),
+  porta `11434` na rede local, `OLLAMA_NUM_PARALLEL=4`.
+- Acesso SSH pro Claude Code (chave dedicada, `sudo` irrestrito sem
+  senha) usado pra fazer toda essa configuração — ver inventário de
+  credenciais em `security.md`.
+- Como qualquer sistema (não só o `wepdev-financas`) usa esse Ollama:
+  [`docs/architecture/ollama-servidor-guia.md`](ollama-servidor-guia.md).
+
 ## 3. Ingress e deploy — resolvido
 
 As duas pendências foram fechadas: ingress via **Cloudflare Tunnel**
