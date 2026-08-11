@@ -3776,3 +3776,381 @@ Testes dos serviços tocados, todos verdes: 88 no card-service (+6), 68 no
 document-service, 68 no ai-service (+4), 52 no web. `transaction-service`
 só ganhou um ajuste de Javadoc (comentário desatualizado), sem mudança de
 comportamento — suite dele não re-executada.
+
+## 2026-08-11 — Fechamento da fatia 6: CI, Docker Compose, docs
+
+Pedido: "continue de onde parou" — item 10 (último) do backlog da fatia 6
+em `docs/tasks.md`, sem escopo novo do usuário: CI (`web`), serviço `web`
+no `docker-compose.yml`, `.env.example`, `diagrams.md`, `overview.md`,
+`roadmap.md`, `README.md` raiz.
+
+Feito: job `web` novo em `ci.yml` (único job Node.js do CI — `npm ci`,
+lint, testes, `npm audit --omit=dev` como gate de vulnerabilidade —
+`security.md` seção 6/CLAUDE.md princípio 7, sem OWASP Dependency-Check
+aqui, é ferramenta Java —, build de produção, build de imagem Docker de
+validação), `web` no path filter do job `changes`. Serviço `web` novo no
+`docker-compose.yml` (porta 3000, depende dos seis serviços + Keycloak).
+`diagrams.md`: `web` no container graph com `BudgetSvc` (gap real
+encontrado — o dashboard já usa `lib/budget-service.ts` desde o item 6,
+mas a aresta nunca tinha sido desenhada). `overview.md`: tabela de
+clientes ganhou porta/status, nota de UX desatualizada removida (já
+existe `design-system.md` desde o item 8). `roadmap.md`/`README.md` raiz
+atualizados (fatia 6 → Entregue, estrutura de pastas, seção "Estado
+atual", URL do `web`, contagem de serviços no CI/compose seis→sete).
+
+**Dois bugs reais achados rodando o `web` como container pela primeira
+vez** (nunca tinha sido testado fora de `npm run dev`, só contra
+`localhost` sem Docker de permeio) — só apareceram ao validar de
+verdade, não em teste automatizado:
+
+1. **Keycloak inalcançável de dentro do container.** O servidor Next.js
+   (troca de código por token, renovação, userinfo, jwks) roda dentro do
+   container `web`, que não alcança `localhost:8080` (é o próprio
+   container — mesma classe de problema já resolvida nos serviços Java
+   desde a fatia 1 com `discovery-enabled=false` + path explícito). O
+   Auth.js exige solução um pouco diferente: só trocar a URL do
+   `issuer` não bastaria, porque com discovery OIDC ligado o discovery
+   document do Keycloak sempre devolve URL "localhost" (mesmo
+   `KC_HOSTNAME=localhost` que estabiliza o claim `iss`), inalcançável
+   de dentro do container. Corrigido lendo o código-fonte real do
+   `@auth/core` (`lib/actions/callback/oauth/callback.ts` e
+   `.../signin/authorization-url.ts`): informar `token`/`userinfo`/
+   `jwks_endpoint` explícitos no provider Keycloak faz o Auth.js pular a
+   chamada de discovery inteiramente. `AUTH_KEYCLOAK_ISSUER` (público)
+   segue usado só pro `issuer`/redirect de login-logout, que o navegador
+   precisa alcançar direto; `AUTH_KEYCLOAK_INTERNAL_ISSUER` (nova,
+   opcional — cai no valor público se ausente, caso de dev local sem
+   Docker) alimenta os três endpoints de servidor + a chamada de refresh
+   de token em `lib/auth-token.ts`. Validado via roteiro de `curl`
+   simulando o navegador inteiro (GET `/api/auth/csrf` → POST
+   `/api/auth/signin/keycloak` com CSRF real → segue o redirect pro
+   Keycloak → POST no formulário de login (`usuario.teste`/
+   `financas123`) → segue o redirect de volta pro callback do `web`) —
+   contra o container real, token trocado com sucesso.
+2. **Cookie de sessão nunca encontrado, mesmo com o token trocado
+   certo.** `GET /` autenticado dava 500 ("Sessão sem access token
+   válido"). Achado por instrumentação temporária (`console.error` no
+   `jwt()` de `auth.ts` e em `lib/auth-token.ts`, removida depois de
+   confirmar e corrigir): a leitura manual do cookie (`getToken()` em
+   `lib/auth-token.ts`, usada fora do fluxo do Auth.js pra propagar o
+   access token aos microsserviços) decidia o NOME do cookie
+   (`__Secure-authjs.session-token` vs `authjs.session-token` sem
+   prefixo) olhando `NODE_ENV`, mas o próprio Auth.js decide isso pelo
+   protocolo REAL da requisição (`url.protocol === "https:"`, não
+   `NODE_ENV` — confirmado lendo `@auth/core/src/lib/init.ts`). A imagem
+   Docker tem `NODE_ENV=production` fixo (`Dockerfile`, `ENV
+   NODE_ENV=production`), mas em dev local via `docker-compose` o
+   protocolo continua http (só produção real, atrás do Cloudflare
+   Tunnel — ADR-0019 — é https de verdade) — `getToken()` procurava o
+   nome errado e sempre devolvia `null`, mesmo a sessão existindo de
+   verdade (`auth()`, usado pelo `proxy.ts`/layout, decodificava o MESMO
+   cookie sem problema, porque usa o protocolo real — a divergência era
+   só entre os dois mecanismos de leitura do mesmo cookie). Corrigido
+   tentando os dois nomes de cookie em `obterTokenBruto()`, em vez de
+   inferir por variável de ambiente — funciona em dev, atrás do
+   Cloudflare Tunnel e em qualquer topologia futura, sem depender de
+   header de proxy específico (`x-forwarded-proto` ou similar) que pode
+   nem existir localmente.
+
+Revalidado do zero depois dos dois fixes, sempre contra o container
+real (`docker compose up -d --build`, sete serviços de aplicação + toda
+a infra): roteiro de login completo via `curl` + `GET /`, `/contas`,
+`/transacoes`, `/cartoes`, `/documentos`, `/chat` autenticados — todos
+200, dashboard renderizou o nome do usuário e o "disponível pra gastar"
+reais. No meio da validação, Kafka caiu sozinho com
+`NodeExistsException` no Zookeeper (znode efêmero zumbi de uma sessão
+anterior, sem relação com o `web`) — resolvido recriando os containers
+`zookeeper`/`kafka`.
+
+`npm test` (52), `npm run lint`, `npm run build` e `npm audit --omit=dev`
+(0 vulnerabilidades) verdes; build da imagem Docker validado local
+(`docker build`) e via `docker compose up -d --build` contra a stack
+real inteira.
+
+Criado: job `web` em `.github/workflows/ci.yml`; serviço `web` em
+`docker-compose.yml`. Alterado: `services/web/auth.ts` (discovery OIDC
+desligado, `token`/`userinfo`/`jwks_endpoint` explícitos,
+`AUTH_KEYCLOAK_INTERNAL_ISSUER` novo), `services/web/lib/auth-token.ts`
+(`obterTokenBruto()` tenta os dois nomes de cookie; chamada de refresh
+usa o issuer interno), `services/web/.env.example` (variável nova,
+comentário reescrito), `.env.example` raiz (`AUTH_SECRET`),
+`docs/architecture/diagrams.md` (container graph — `web`→`BudgetSvc`,
+label com porta), `docs/architecture/overview.md` (tabela de clientes),
+`docs/roadmap.md` (fatia 6 → Entregue), `docs/tasks.md` (item 10 →
+concluído), `README.md` raiz.
+
+## 2026-08-11 — Teste real pelo navegador: 2 bugs de UX corrigidos + achado de contenção do Ollama
+
+Pedido: "preciso que você consiga acessar meu navegador para fazer testes
+e resolver os possíveis bugs do nosso sistema" — usuário estava testando
+o upload da fatura Santander (`Fatura_082026_teste_...pdf`) de verdade
+contra o `web` recém fechado (fatia 6, item 10) e caiu num erro genérico
+do Chrome ("This page couldn't load"). Autorizei acesso via
+`claude-in-chrome` e testei ao vivo, no mesmo navegador do usuário (aba
+nova, mas cookies compartilhados — mesmo perfil do Chrome).
+
+**Bug 1 — sessão expirada quebrava a página em vez de avisar.**
+Reproduzido na hora (aba nova herdou cookie de sessão velho, com token e
+refresh token já expirados de tanto eu testar antes). Causa: o
+`app/(app)/layout.tsx` já checava `sessao.error` (setado em `auth.ts`
+quando a renovação falha) e mostrava um aviso, mas continuava
+renderizando `children` por baixo — as páginas chamavam os
+microsserviços com token morto, tomavam 401 não tratado, e o Next.js
+abortava a conexão no meio do streaming (sem `error.tsx`/
+`global-error.tsx` nenhum no projeto até então, então não tinha rede de
+segurança nenhuma). Corrigido: `AppLayout` agora CORTA o render de
+`children` quando `sessao.error` existe, mostrando só a tela "Sua sessão
+expirou" com botão "Entrar novamente" — mesmo padrão de guarda que
+`/login` já usa pro caso inverso. Adicionado `app/error.tsx` (boundary
+de rota) e `app/global-error.tsx` (boundary do layout raiz) como rede de
+segurança pra qualquer outro erro não tratado — nenhum dos dois existia
+antes. Validado via `curl` com um cookie de sessão real e velho: antes
+`GET /` dava 500 sem corpo útil; depois, 200 com a tela de "sessão
+expirada" de verdade.
+
+**Bug 2 — erro do chat aparecia como "Minified React error #441"
+pro usuário.** Descoberto testando o chat de propósito enquanto a fatura
+processava (pergunta do usuário: "a IA consegue responder enquanto
+processa fatura?"). Mandei uma pergunta real no chat durante o
+processamento — demorou ~127s e falhou (achado 3, abaixo), mas o erro
+que apareceu na conversa foi um texto de framework sem sentido nenhum
+pro usuário. Causa raiz: Server Action que **lança** (`throw`) uma
+exceção tem a mensagem REDACTADA pelo Next.js em produção (troca por um
+"Minified React error #441" genérico, sem digest nem pista nenhuma) —
+mesmo com try/catch do lado do client, `.message` já chega sanitizado.
+`enviarMensagemAction` (`app/(app)/chat/actions.ts`) era a única Server
+Action do chat que deixava isso acontecer — `definirConfiguracaoIaAction`,
+no mesmo arquivo, já usava o padrão certo (captura o erro e RETORNA um
+objeto serializável, nunca lança). Corrigido replicando esse padrão:
+`enviarMensagemAction` agora retorna
+`{sucesso: true, resultado} | {sucesso: false, erro}`, nunca lança;
+`chat-client.tsx` ajustado pro novo formato. Validado via `npm test`
+(52)/lint/build limpos; reteste real do fluxo de timeout fica pendente
+(ver achado 3).
+
+**Achado 3 — Ollama só processa uma geração por vez (`ollama ps`
+mostrou 1 slot ativo), então chat e extração de fatura NUNCA rodam em
+paralelo nessa infra — competem pelo mesmo recurso.** Ao mandar uma
+pergunta no chat enquanto a fatura Santander processava, a pergunta
+ficou "na fila" atrás da extração, e como o `@Timeout` do `ai-service`
+pro Ollama é bem mais curto (120s) que o do `document-service` (600s), o
+chat estourou timeout primeiro (confirmado no log:
+`OllamaRestClient#gerar timed out` às 14:43:41, ~127s depois do envio).
+Pior: isso também **atrasou a própria extração da fatura**, que enfileirou
+atrás da chamada do chat — a fatura, que já estava perto do limite de
+10 minutos, estourou o timeout dela também nas duas tentativas feitas
+nesta sessão (`ERRO_PROCESSAMENTO`, 2026-08-11T13:57 e 14:38 UTC,
+exatamente ~10min01s de duração as duas vezes). Isso confirma, na
+prática, o risco que já estava anotado desde a fatia 3
+(`docs/tasks.md`, "inferência local em CPU pode levar vários minutos,
+revisitar quando a fatia 6 chegasse") — só que o efeito colateral de
+CONTENÇÃO entre features diferentes (chat vs. extração de documento,
+todas usando o mesmo container `ollama` com 1 slot) não tinha sido
+observado antes. **Não resolvido ainda** — usuário decidiu deixar o
+reenvio da fatura de lado por ora; fica registrado como risco conhecido,
+não mascarado. Opções futuras, não decididas: aumentar `@Timeout`/
+`read-timeout` dos dois serviços, configurar `OLLAMA_NUM_PARALLEL` (efeito
+duvidoso num host sem GPU — dividir a mesma CPU entre duas gerações
+tende só a deixar as duas mais lentas, não resolver a contenção de
+verdade), ou aceitar como limitação conhecida de ambiente de
+desenvolvimento single-machine (produção real ainda não foi dimensionada
+pra isso).
+
+Criado: `services/web/app/error.tsx`, `services/web/app/global-error.tsx`.
+Alterado: `services/web/app/(app)/layout.tsx` (corta `children` quando
+`sessao.error`), `services/web/app/(app)/chat/actions.ts`
+(`enviarMensagemAction` retorna em vez de lançar),
+`services/web/app/(app)/chat/chat-client.tsx` (novo formato de retorno).
+`npm test` (52)/lint/build limpos; validado contra o container `web`
+real (rebuild + `curl` com sessão expirada real).
+
+## 2026-08-11 — Ollama concorrente (achado de contenção real) + placa de vídeo pro servidor
+
+Pedido: "preciso que o ollama seja capaz de processar várias faturas ao
+mesmo tempo... e tem que ser capaz de responder vários usuários ao mesmo
+tempo" — reação direta ao achado 3 da entrada anterior (chat e extração
+de fatura brigando pelo mesmo slot do Ollama).
+
+Testado (`docker-compose.yml`, mudança feita mas **ainda não commitada**):
+`OLLAMA_NUM_PARALLEL=2` no serviço `ollama`. Validado com upload real de
+fatura (Nubank, via `curl` direto nos serviços — descobri no caminho que
+faltava o campo `tipo=FATURA_CARTAO` no multipart, spec já documentava
+isso certo) + pergunta real no chat, as duas ao mesmo tempo. Resultado:
+**ajuda, mas não resolve de verdade** — a primeira chamada do
+`ai-service` ao Ollama rodou livre (~23s, sem contenção, terminou antes
+do documento começar a gerar), mas a segunda chamada colidiu com o
+prompt processing do documento (3139 tokens, ~129s só nessa fase) e
+ficou esfaimada mesmo tendo slot dedicado — achado técnico real: o
+`llama.cpp`/Ollama processa os slots dentro do MESMO laço de lote, e um
+prompt grande domina esse laço, atrasando a geração de outro slot mesmo
+ele "não estando na fila" formalmente. `NUM_PARALLEL=2` também dobrou o
+consumo de RAM do Ollama (5,3GB → 7,87GB) só pelo cache de contexto
+extra.
+
+Medido o teto real da máquina: 15GB RAM total, só ~4GB livres com **só**
+esse projeto rodando (nada de outros projetos). Servidor de produção tem
+o mesmo perfil de hardware (`docs/architecture/deployment.md`) e **ainda
+por cima já hospeda outros projetos** (portfólio, Umami, Postgres,
+pgAdmin, Portainer, Watchtower) — rodar uma segunda instância completa
+do Ollama (mais um modelo de ~5-8GB carregado) não cabe com folga em
+nenhum dos dois ambientes. Concluído junto com o usuário: só ajuste de
+config não resolve isso em CPU sem GPU; o caminho real é hardware.
+
+**Decisão**: usuário tem uma RTX 5070 Ti (16GB GDDR7, 896 GB/s) numa
+outra máquina e vai mover pro servidor de produção. Recomendação dada:
+uma instância só do Ollama com GPU + `NUM_PARALLEL` mais alto (16GB de
+VRAM dá folga — não precisa de duas instâncias separadas, GPU lida bem
+com lotes concorrentes, diferente da CPU). Pesquisei GPUs de mercado
+(2026) antes de confirmar que a placa que ele já tinha servia — RTX 5070
+Ti tem banda de memória (896 GB/s) equivalente ou melhor que as opções
+de orçamento pesquisadas.
+
+**Configuração de acesso SSH pro Claude Code**, pedida explicitamente
+pelo usuário pra eu poder levantar informação do servidor antes da
+instalação: recusei digitar a senha SSH fornecida em chat (regra de
+segurança que não abre exceção mesmo com autorização explícita — nunca
+entro credencial real em nenhum prompt). Gerada chave dedicada
+(`ed25519`, sem passphrase, só pra esse fim — nome
+`id_ed25519_wepdev_financas_servidor`, fora do repositório, com alias em
+`~/.ssh/config` local), usuário adicionou a chave pública no
+`authorized_keys` do servidor com restrição `from="<faixa da rede
+Wi-Fi>"` (só autentica vindo de dentro dessa rede, mesmo que a chave
+pública vaze). **Achado real no meio da configuração**: primeira
+tentativa de conexão falhou — o cliente SSH nem chegou a oferecer a
+chave, porque `/etc/ssh/sshd_config` tinha `AuthenticationMethods
+password` forçando só senha, apesar de `PubkeyAuthentication yes`
+também estar ligado. Corrigido comentando essa linha (backup do config
+original feito antes, no próprio servidor) + `sudo systemctl reload
+ssh` (não `sshd` — nome do serviço no Ubuntu é `ssh.service`, achado
+raso mas travou por um passo). Conexão validada sem senha depois disso.
+
+Levantamento do servidor real, pela chave nova: Intel i7-8700 (6
+núcleos/12 threads), 15GB RAM (só 2,1GB em uso agora, produção ainda não
+roda o `wepdev-financas`), 140GB de disco livre, Ubuntu 24.04.4/kernel
+6.8, só GPU integrada Intel UHD 630 (nenhum driver NVIDIA ainda — terreno
+limpo), Docker 29.2.1/Compose v5.0.2 (moderno, suporta reserva de GPU em
+compose sem drama). Usuário confirmou fisicamente: espaço no gabinete,
+conector de energia certo na fonte, fonte de 850W (folga real acima dos
+~300W da placa). Nenhum bloqueio encontrado pra instalação.
+
+**Pendente pra próxima sessão**: usuário ainda não instalou a placa
+fisicamente. Depois de instalada: driver NVIDIA + NVIDIA Container
+Toolkit no servidor, config de GPU no `docker-compose.yml` (serviço
+`ollama`, ainda não escrita), decidir destino do `OLLAMA_NUM_PARALLEL=2`
+(hoje só ajuda parcialmente em CPU — com GPU pode subir mais), e
+documentar a decisão final como ADR (referenciado como ADR-0029 no
+comentário do `docker-compose.yml`, ainda não escrito de verdade). Nada
+disso foi commitado ainda — ver estado do repo na entrada anterior.
+
+Criado: chave SSH `~/.ssh/id_ed25519_wepdev_financas_servidor` (fora do
+repo), entrada em `~/.ssh/config` (fora do repo), backup
+`/etc/ssh/sshd_config.bak-<data>` no servidor. Alterado:
+`docs/architecture/security.md` (inventário de credenciais — chave SSH
+nova), `docker-compose.yml` (`OLLAMA_NUM_PARALLEL=2`, ainda sem ADR),
+`/etc/ssh/sshd_config` no servidor (`AuthenticationMethods` comentado).
+
+## 2026-08-11 (continuação) — GPU instalada, Ollama migrado pro servidor (ADR-0029)
+
+Pedido: comparar placas de vídeo mais baratas (usuário pesquisando preço
+antes de comprar), depois decisão final de usar a RTX 5070 Ti que já
+tinha disponível numa outra máquina, seguida de "faça todas as
+configurações necessárias" pra colocar o Ollama do servidor em uso de
+verdade no projeto.
+
+**Comparação de GPUs** (só pesquisa, sem código): RTX 3060 12GB, RTX
+2060 12GB, RTX 2080 Ti 11GB (achado: banda de memória, 616 GB/s, maior
+que a RTX 5060 Ti nova — melhor custo-benefício de toda a lista), RTX
+4060 12GB (não existe — só RTX 4060 Ti em 8/16GB ou RTX 4070 em 12GB),
+RTX 4060 Ti 16GB (achado real: banda de memória, 288 GB/s, **menor** que
+a RTX 3060 de 2021, apesar de mais nova e com mais VRAM — evitar
+recomendar), comparativo final de todas as placas 12GB+ discutidas.
+Usuário decidiu manter a RTX 5070 Ti que já tinha.
+
+**Instalação física**: usuário identificou que o SSD de sistema
+(XPG SPECTRIX, numa placa adaptadora PCIe) ocupava o slot que a GPU
+precisava. Descoberto o modelo da placa-mãe sem precisar de sudo
+(`/sys/class/dmi/id/board_name`, legível sem root) — **ASUS TUF
+B360M-PLUS GAMING/BR** — confirmado no manual oficial que ela tem 2
+slots M.2-2280 nativos. Antes de autorizar a troca física, verifiquei
+`/etc/fstab` e `efibootmgr -v`: todas as montagens usam UUID/LVM (nunca
+caminho físico de dispositivo), e a entrada de boot UEFI ativa também
+usa UUID da partição GPT — confirmação de que trocar o disco de slot
+físico não quebraria o boot. Usuário desligou (`sudo shutdown -h now` —
+minha chave SSH não tinha `sudo` ainda nessa hora, precisou pedir pra
+ele rodar), moveu o SSD pro M.2 nativo, instalou a GPU, religou.
+Verificado por SSH: sistema íntegro, todos os outros projetos do
+servidor (portfólio, Umami, Postgres, pgAdmin, Portainer, Watchtower)
+voltaram sozinhos, GPU detectada no barramento PCIe.
+
+**Sudo irrestrito pro Claude Code**: usuário pediu acesso de sudo pra eu
+rodar os comandos direto, sem ficar repassando. Apresentei o trade-off
+(escopo restrito aos comandos da sessão vs. total) — usuário escolheu
+total. `wepdev ALL=(ALL) NOPASSWD: ALL` em `/etc/sudoers.d/claude-code`
+(permissão 440, validado com `visudo -c` antes de confiar). Documentado
+em `security.md` como atualização da entrada da chave SSH, com o
+trade-off de segurança explícito (rede continua sendo a única barreira
+se a chave privada vazar).
+
+**Driver NVIDIA + Container Toolkit**: pedido `nvidia-driver-570-open`
+(mínimo confirmado por pesquisa pra suportar Blackwell/RTX 50), mas o
+`apt` resolveu pra `580.173.02` (mais novo, também suporta — sem
+problema). **Achado real no meio do processo**: `sudo apt update`
+travou de verdade (~8 minutos sem uso de CPU, conectividade de rede/DNS/
+mirror todas OK — provável prompt interativo escondido); resolvido com
+Ctrl+C do lado do usuário + `kill -9` de contingência (não precisou).
+Depois de reiniciar, driver carregou limpo: `nouveau` sumiu, RTX 5070 Ti
+reconhecida (`nvidia-smi`: 580.173.02, CUDA 13.0, 16303MiB). NVIDIA
+Container Toolkit instalado e configurado (`nvidia-ctk runtime configure
+--runtime=docker`), testado com container `nvidia/cuda` real reconhecendo
+a placa via `--gpus all`.
+
+**Ollama no servidor, testado de verdade**: container `ollama/ollama`
+avulso (fora de qualquer `docker-compose.yml` por ora), `--gpus all`,
+`OLLAMA_NUM_PARALLEL=4`, porta `11434` na rede local, modelo `llama3.1`
+baixado. Resultados medidos, não estimados:
+- Velocidade: segunda chamada (modelo já quente) gerou 81 tokens em
+  638ms = **~127 tokens/segundo** — mais de 30x mais rápido que os ~4
+  tokens/s da CPU.
+- Concorrência real (o teste que motivou tudo isso): prompt grande
+  (~3000 tokens, simulando fatura) + pergunta curta enviados ao mesmo
+  tempo — **os dois terminaram em ~4 segundos cada**, sem fila, sem
+  timeout. Comparado com o mesmo cenário na CPU (chat esperou 127s e
+  estourou timeout de 120s), confirma que o problema está resolvido de
+  verdade, não só mitigado.
+
+**Projeto reconfigurado pra usar o Ollama do servidor**:
+`docker-compose.yml` — serviço `ollama` local removido por completo
+(container, porta 11500, volume `ollama-data`), `document-service`/
+`ai-service` ganharam `OLLAMA_BASE_URL: ${OLLAMA_SERVER_URL}` nos
+`depends_on`/`environment` (removida a dependência de `ollama:
+service_started`, que não existe mais). `OLLAMA_SERVER_URL` é variável
+nova, só em `.env` local (gitignored) — endereço de rede interna nunca
+em arquivo versionado, mesma regra de sempre; documentado com
+placeholder em `.env.example`, incluindo como voltar a apontar pra um
+Ollama local se a rede não estiver disponível. Validado de ponta a
+ponta: `document-service`/`ai-service` recriados localmente, pergunta
+real via `POST /api/v1/chat` batendo no Ollama do servidor pela rede,
+resposta em 2,2 segundos.
+
+ADR-0029 escrita (`docs/architecture/adr/0029-ollama-servidor-gpu-dedicada.md`)
+consolidando toda a decisão, os achados técnicos e os trade-offs
+assumidos (dependência de rede, sudo irrestrito, porta do Ollama exposta
+na LAN sem autenticação própria). `docs/architecture/deployment.md`
+atualizado com o estado real do servidor pós-GPU (placa-mãe, driver,
+Ollama). `README.md`/`diagrams.md` atualizados (Ollama não é mais
+"local"). Pendência registrada na própria ADR: o `docker run` avulso do
+Ollama no servidor deve ser incorporado a um `docker-compose.yml` de
+produção quando a fatia 9 (deploy completo, ainda `🔲 Planejado`)
+acontecer — hoje é configuração solta, não gerenciada pelo projeto.
+
+Criado: `docs/architecture/adr/0029-ollama-servidor-gpu-dedicada.md`;
+`.env` (local, gitignored); `/etc/sudoers.d/claude-code` no servidor;
+container `ollama` no servidor (fora de compose). Alterado:
+`docker-compose.yml` (remove serviço `ollama` + volume `ollama-data`,
+`document-service`/`ai-service` apontam pro servidor via
+`OLLAMA_SERVER_URL`), `.env.example` (variável nova documentada),
+`docs/architecture/security.md` (sudo irrestrito documentado),
+`docs/architecture/deployment.md` (estado real do servidor pós-GPU),
+`README.md`, `docs/architecture/diagrams.md`. No servidor:
+`/etc/modprobe.d`/initramfs (driver NVIDIA), `/etc/docker/daemon.json`
+(runtime NVIDIA).

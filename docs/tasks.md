@@ -1245,11 +1245,70 @@ função que faz a chamada).
    HTML renderizado contém a resposta de verdade — a primeira vez nesta
    fatia que dá pra validar um fluxo de IA de ponta a ponta pela UI, não
    só pela API. 5 testes automatizados novos (`ai-service.test.ts`).
-10. 🔲 Fechamento da fatia: CI (job `web` — `npm test`, `npm run build`,
-   build de imagem Docker de validação; sem OWASP Dependency-Check
-   Maven aqui, usar `npm audit` — ver `security.md` seção 6 e princípio
-   7 do `CLAUDE.md`), `docker-compose.yml` (serviço `web`, porta 3000),
-   `.env.example` (variáveis novas do Next.js/Auth.js), `diagrams.md`
-   (container graph com o `web` apontando pros seis serviços),
-   `overview.md`, `roadmap.md` (fatia 6 → ✅ Entregue), `README.md`
-   raiz, `docs/historico.md`.
+10. ✅ Fechamento da fatia: CI (job `web` — `npm ci`/lint/test/`npm audit
+   --omit=dev`/`npm run build`/build de imagem Docker de validação, sem
+   OWASP Dependency-Check Maven aqui — ver `security.md` seção 6 e
+   princípio 7 do `CLAUDE.md`), `docker-compose.yml` (serviço `web`,
+   porta 3000, depende dos seis serviços), `.env.example` raiz
+   (`AUTH_SECRET`), `diagrams.md` (container graph com `web` apontando
+   pros seis serviços — `BudgetSvc` também estava faltando, corrigido
+   junto), `overview.md` (tabela de clientes com porta/status),
+   `roadmap.md` (fatia 6 → ✅ Entregue), `README.md` raiz.
+
+   **Achado real rodando o `web` como container pela primeira vez**
+   (nunca tinha sido testado fora de `npm run dev`): dois problemas reais
+   de rede/sessão, só visíveis com o processo Next.js de fato isolado do
+   navegador.
+   - **Keycloak dentro do container**: o servidor Next.js (troca de
+     código por token, renovação, userinfo, jwks) roda dentro do
+     container `web`, que não alcança `localhost:8080` (é o próprio
+     container — mesma classe de problema já resolvida nos serviços Java
+     desde a fatia 1, mas o Auth.js exige solução diferente: não dá pra
+     só trocar a URL, porque com discovery OIDC ligado o discovery
+     document do Keycloak sempre devolve URLs "localhost", inalcançáveis
+     de dentro do container). Corrigido desabilitando discovery no
+     provider Keycloak (`wellKnown` omitido, `token`/`userinfo`/
+     `jwks_endpoint` explícitos — ver `node_modules/@auth/core/src/lib/actions/callback/oauth/callback.ts`,
+     que pula a chamada de discovery quando esses dois já vêm
+     resolvidos) e separando `AUTH_KEYCLOAK_ISSUER` (público, só pro
+     redirect de login/logout que o navegador precisa alcançar) de
+     `AUTH_KEYCLOAK_INTERNAL_ISSUER` (novo, opcional — usado pelas
+     chamadas de servidor: token/userinfo/jwks/refresh; em dev local sem
+     Docker cai no mesmo valor do público). Validado de ponta a ponta
+     via `curl` simulando o navegador (CSRF → redirect de login →
+     formulário do Keycloak → callback) contra o container real: código
+     trocado por token com sucesso, sessão criada.
+   - **Cookie de sessão não encontrado dentro do container**: mesmo com
+     o token trocado corretamente, `GET /` autenticado dava 500
+     ("Sessão sem access token válido"). Causa raiz, achada por
+     instrumentação temporária (`console.error` no `jwt()` callback e em
+     `lib/auth-token.ts`, removida depois): a leitura manual do cookie
+     (`getToken()` em `lib/auth-token.ts`, usada fora do fluxo do
+     Auth.js pra propagar o access token aos microsserviços) decidia o
+     NOME do cookie (`__Secure-authjs.session-token` vs
+     `authjs.session-token` sem prefixo) usando `NODE_ENV`, mas o
+     próprio Auth.js decide isso pelo protocolo REAL da requisição
+     (http vs https). A imagem Docker tem `NODE_ENV=production` fixo
+     (Dockerfile), mas em dev local via `docker-compose` o protocolo
+     continua http (só produção real, atrás do Cloudflare Tunnel —
+     ADR-0019 — é https de verdade) — `getToken()` procurava o nome
+     errado e sempre devolvia `null`, apesar da sessão existir (`auth()`,
+     que usa o protocolo real, decodificava o mesmo cookie sem problema
+     — divergência só entre os dois mecanismos de leitura). Corrigido
+     tentando os dois nomes de cookie em `obterTokenBruto()`, em vez de
+     adivinhar por variável de ambiente — funciona em dev, atrás do
+     Cloudflare Tunnel e em qualquer topologia futura, sem depender de
+     header de proxy específico. Revalidado do zero (login completo via
+     `curl` + `GET /`, `/contas`, `/transacoes`, `/cartoes`,
+     `/documentos`, `/chat` autenticados, todos 200 contra o container
+     real) — dashboard renderizou o nome do usuário e o "disponível pra
+     gastar" reais.
+
+   Kafka caiu no meio da sessão com `NodeExistsException` no Zookeeper
+   (znode efêmero de sessão anterior, zumbi de infraestrutura sem
+   relação com o `web`) — resolvido recriando `zookeeper`/`kafka`.
+
+   `npm test` (52), `npm run lint`, `npm run build` e `npm audit
+   --omit=dev` (0 vulnerabilidades) verdes; build da imagem Docker
+   validado local e via `docker compose up -d --build` contra a stack
+   real inteira (sete serviços de aplicação + toda a infra).

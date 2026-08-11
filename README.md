@@ -70,7 +70,8 @@ wepdev-financas/
     ├── card-service/           # Quarkus — cartões, fatura e parcelamento
     ├── document-service/       # Quarkus — upload/parsing de fatura via LLM local
     ├── budget-service/         # Quarkus — orçamento e "disponível pra gastar"
-    └── ai-service/             # Quarkus — chat com IA, RAG, ação por comando
+    ├── ai-service/             # Quarkus — chat com IA, RAG, ação por comando
+    └── web/                    # Next.js — front-end, BFF pros seis serviços acima
 ```
 
 ### Estado atual
@@ -148,24 +149,50 @@ provedor de LLM (OpenAI ou Ollama) é configurável por usuário, `apiKey`
 criptografada em repouso (AES-256/GCM). 64 testes, imagem Docker
 validada. Backlog completo (ver `docs/tasks.md`).
 
+**`web`** é o front-end Next.js (React) — dashboard com gráfico de gastos
+por categoria (PRD 3.7), CRUD completo de conta/transação/cartão, upload
+de documento (polling assíncrono até a extração terminar) e chat com a
+IA, tudo autenticado via Keycloak (Auth.js v5, client público `web-app`,
+sem `client_secret` — [ADR-0027](docs/architecture/adr/0027-autenticacao-frontend-authjs-keycloak.md)).
+Server Components/Route Handlers do próprio Next.js fazem o papel de BFF,
+propagando o token do usuário logado pros seis serviços acima — nunca
+client_credentials. Rodando como container, o servidor Next.js fala com
+o Keycloak por dois caminhos diferentes: `AUTH_KEYCLOAK_ISSUER` (público,
+só pro redirect de login/logout que o navegador precisa alcançar) e
+`AUTH_KEYCLOAK_INTERNAL_ISSUER` (rede interna do Docker, pras chamadas de
+troca/renovação de token — discovery OIDC desligado de propósito, senão
+o discovery document do Keycloak sempre devolveria URL pública,
+inalcançável de dentro do container). 52 testes, imagem Docker validada.
+Backlog completo (ver `docs/tasks.md`).
+
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
-(privado). CI 100% verde — `mvn test` passa nos seis serviços no runner
-hospedado, cobertura publicada como artefato do run (JaCoCo), a imagem
-Docker é validada a cada mudança (`docker build`, sem publicar em
-registry) e o scan de vulnerabilidade (OWASP Dependency-Check, ADR-0017)
-também passa, com a `NVD_API_KEY` ativa (ver
+(privado). CI 100% verde — `mvn test` passa nos seis serviços Java e
+`npm test` no `web`, todos no runner hospedado, cobertura publicada como
+artefato do run (JaCoCo nos serviços Java), a imagem Docker de cada um é
+validada a cada mudança (`docker build`, sem publicar em registry) e o
+scan de vulnerabilidade passa nos sete — OWASP Dependency-Check
+(ADR-0017) nos serviços Java, `npm audit` no `web` (sem ferramenta Java
+lá, ver `security.md` seção 6) — com a `NVD_API_KEY` ativa (ver
 [`docs/architecture/security.md`](docs/architecture/security.md)). Ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 
 `docker compose up -d --build account-service transaction-service
-card-service document-service budget-service ai-service` sobe os seis
-serviços + toda a infra (MySQL, Redis, MongoDB, Qdrant, Keycloak, Kafka,
-Ollama, Prometheus, Grafana) do zero, com autenticação de verdade
-funcionando — validado ponta a ponta (criar conta → registrar transação/
-criar cartão/importar fatura/conversar com a IA → saldo atualizado, via
-containers). Pra desenvolvimento do dia a dia, mais rápido rodar só a
-infra via compose e os serviços em `mvn quarkus:dev` local (ver README de
-cada serviço).
+card-service document-service budget-service ai-service web` sobe os
+sete serviços + toda a infra (MySQL, Redis, MongoDB, Qdrant, Keycloak,
+Kafka, Prometheus, Grafana) do zero, com autenticação de verdade
+funcionando — validado ponta a ponta (login no navegador → criar conta →
+registrar transação/criar cartão/importar fatura/conversar com a IA →
+saldo atualizado, via containers). Pra desenvolvimento do dia a dia, mais
+rápido rodar só a infra via compose e os serviços em `mvn quarkus:dev`/
+`npm run dev` local (ver README de cada serviço).
+
+**Ollama não roda mais neste `docker-compose.yml`** (ADR-0029,
+2026-08-11) — CPU sem GPU não aguentava chat e extração de fatura ao
+mesmo tempo (achado real, testado na prática). Agora roda no servidor de
+produção, numa GPU dedicada; `document-service`/`ai-service` apontam pra
+lá via `OLLAMA_SERVER_URL` (`.env`, nunca versionado). Ver
+`.env.example` pra como voltar a apontar pra um Ollama local se
+necessário.
 
 ## Endpoints principais (`account-service`, porta `8081`)
 
@@ -301,6 +328,7 @@ padrão pra produção, ainda não implantado) em
 
 | O quê | URL | Credenciais |
 |---|---|---|
+| `web` (front-end) | `http://localhost:3000` | login via Keycloak (Auth.js), ver `usuario.teste` em `infra/keycloak/realm-financas.json` |
 | `account-service` (REST) | `http://localhost:8081` | token OIDC, ver abaixo |
 | `account-service` — Swagger UI | `http://localhost:8081/q/swagger-ui` | — |
 | `account-service` — OpenAPI (importar no Postman) | `http://localhost:8081/q/openapi` | — |
@@ -323,7 +351,7 @@ padrão pra produção, ainda não implantado) em
 | MySQL (`account_db`/`transaction_db`/`card_db`/`document_db`/`budget_db`, ex: via DBeaver) | `localhost:3307` | `financas` / `financas` |
 | MongoDB (`document_service` + `ai-service`, ex: via MongoDB Compass) | `localhost:27017` | `financas` / `financas` |
 | Kafka (broker, ex: DBeaver/cliente Kafka) | `localhost:29092` | — |
-| Ollama (LLM local, ADR-0002) | `http://localhost:11500` | — (11500 no host, não 11434 — ver comentário no `docker-compose.yml`) |
+| Ollama (LLM, ADR-0002/ADR-0029) | Servidor de produção, `OLLAMA_SERVER_URL` no `.env` | — (não roda mais local, ver ADR-0029) |
 | Qdrant (vetores, ADR-0005) — dashboard web | `http://localhost:6333/dashboard` | — |
 | Qdrant — REST/gRPC | `http://localhost:6333` / `localhost:6334` | — |
 

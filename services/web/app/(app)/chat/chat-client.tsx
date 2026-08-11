@@ -58,7 +58,12 @@ export function ChatClient({
     setEnviando(true);
 
     try {
-      const resultado = await enviarMensagemAction(conteudo, conversaId);
+      const resposta = await enviarMensagemAction(conteudo, conversaId);
+      if (!resposta.sucesso) {
+        setErro(resposta.erro);
+        return;
+      }
+      const { resultado } = resposta;
       setMensagens((atual) => [
         ...atual,
         {
@@ -73,6 +78,9 @@ export function ChatClient({
         router.replace(`/chat/${resultado.conversaId}`);
       }
     } catch (e) {
+      // Rede caiu ou algo fora do controle da action (não deveria mais
+      // acontecer pro caso comum — enviarMensagemAction agora sempre
+      // retorna, nunca lança, ver actions.ts).
       setErro(e instanceof Error ? e.message : "Falha ao enviar mensagem");
     } finally {
       setEnviando(false);

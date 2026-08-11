@@ -20,7 +20,7 @@ graph TB
 
     Sistema --> Keycloak[Keycloak — OIDC]
     Sistema --> OpenAI[OpenAI API]
-    Sistema --> Ollama[Ollama — local]
+    Sistema --> Ollama[Ollama — servidor c/ GPU, ADR-0029]
     Sistema --> FCM[Firebase Cloud Messaging]
     Sistema --> WhatsAppLib[WhatsApp — biblioteca não-oficial]
     Sistema --> EmailProvider[Provedor de e-mail transacional]
@@ -36,7 +36,7 @@ configuráveis, não fixas — ver ADR-0002 e ADR-0013.
 ```mermaid
 graph LR
     subgraph Clientes
-        Web[Next.js Web]
+        Web["Next.js Web :3000"]
         Mobile[React Native]
     end
 
@@ -63,6 +63,7 @@ graph LR
     Web --> CardSvc
     Web --> AiSvc
     Web --> DocSvc
+    Web --> BudgetSvc
     Mobile --> AccountSvc
     Mobile --> TxSvc
     Mobile --> AiSvc

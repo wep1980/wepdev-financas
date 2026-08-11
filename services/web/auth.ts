@@ -3,6 +3,16 @@ import Keycloak from "next-auth/providers/keycloak";
 import { precisaRenovar, renovarToken } from "@/lib/auth-token-refresh";
 
 const issuer = process.env.AUTH_KEYCLOAK_ISSUER!;
+// Endpoint de token/userinfo/jwks é chamado pelo próprio servidor Next.js —
+// dentro do docker-compose isso roda num container, que não alcança
+// "localhost:8080" (é o próprio container, não o host, ver KC_HOSTNAME no
+// docker-compose.yml). "issuer" acima continua sendo o valor público
+// (alcançável só pelo navegador, usado no redirect de login/logout e como
+// valor esperado do claim "iss" do token — KC_HOSTNAME=localhost fixa o
+// "iss" como público não importa quem pediu, mesmo achado já resolvido nos
+// serviços Java). Sem AUTH_KEYCLOAK_INTERNAL_ISSUER (dev local, navegador e
+// servidor no mesmo host) os dois valores são iguais.
+const issuerInterno = process.env.AUTH_KEYCLOAK_INTERNAL_ISSUER ?? issuer;
 const clientId = process.env.AUTH_KEYCLOAK_ID!;
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -19,6 +29,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // client_secret continua seguro. Sem isso o Auth.js tentaria enviar
       // Basic Auth com um client_secret undefined e o Keycloak rejeitaria.
       client: { token_endpoint_auth_method: "none" },
+      // "wellKnown" propositalmente omitido: com token/userinfo abaixo já
+      // resolvidos, o Auth.js pula a chamada de discovery inteiramente
+      // (ver node_modules/@auth/core/src/lib/actions/callback/oauth/callback.ts
+      // e .../signin/authorization-url.ts) — sem isso o discovery document
+      // do Keycloak sempre devolveria URLs "localhost" (mesmo KC_HOSTNAME
+      // fixo que estabiliza o "iss"), inalcançáveis de dentro do container.
+      // "authorization" é a única chamada que o navegador precisa alcançar
+      // direto (redirect de login), por isso usa o issuer público; token/
+      // userinfo/jwks são chamados só pelo servidor, por isso usam o interno.
+      authorization: `${issuer}/protocol/openid-connect/auth`,
+      token: `${issuerInterno}/protocol/openid-connect/token`,
+      userinfo: `${issuerInterno}/protocol/openid-connect/userinfo`,
+      jwks_endpoint: `${issuerInterno}/protocol/openid-connect/certs`,
     }),
   ],
   session: { strategy: "jwt" },
@@ -62,7 +85,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       try {
         const renovado = await renovarToken(
           token.refreshToken,
-          issuer,
+          issuerInterno,
           clientId
         );
         token.accessToken = renovado.accessToken;

@@ -28,6 +28,7 @@ jobs:
       document-service: ${{ steps.filter.outputs.document-service }}
       budget-service: ${{ steps.filter.outputs.budget-service }}
       ai-service: ${{ steps.filter.outputs.ai-service }}
+      web: ${{ steps.filter.outputs.web }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -46,6 +47,8 @@ jobs:
               - 'services/budget-service/**'
             ai-service:
               - 'services/ai-service/**'
+            web:
+              - 'services/web/**'
 
   account-service:
     needs: changes
@@ -289,6 +292,40 @@ jobs:
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
         run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+
+  # Único job Node.js do CI — os outros seis são Maven/Java. Sem OWASP
+  # Dependency-Check aqui (é uma ferramenta de dependência Java): gate de
+  # vulnerabilidade via "npm audit" (ADR-0017, security.md seção 6,
+  # CLAUDE.md princípio 7).
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: services/web/package-lock.json
+      - name: Instalar dependências
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Testes
+        run: npm test
+      - name: Scan de vulnerabilidade (npm audit)
+        run: npm audit --omit=dev
+      - name: Build de produção
+        run: npm run build
+      # Só valida que a imagem continua buildando — publicar em registry e
+      # fazer deploy fica pra fatia 9 (ADR-0020/0021, mesmo critério dos
+      # jobs Maven acima).
+      - name: Build da imagem Docker (validação, não publica)
+        run: docker build -f Dockerfile -t web:ci .
 
   budget-service:
     needs: changes

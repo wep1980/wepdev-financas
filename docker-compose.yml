@@ -11,7 +11,6 @@ volumes:
   mysql-data:
   mongo-data:
   keycloak-data:
-  ollama-data:
   qdrant-data:
 
 services:
@@ -72,28 +71,16 @@ services:
       - qdrant-data:/qdrant/storage
     networks: [financas-net]
 
-  # Provedor de LLM local (ADR-0002/ADR-0015) — sem custo por chamada, dado
-  # financeiro sensível nunca sai da máquina. Modelo não vem embutido na
-  # imagem, precisa "ollama pull <modelo>" depois do primeiro up (ver
-  # services/document-service/README.md).
-  ollama:
-    image: ollama/ollama:latest
-    container_name: financas-ollama
-    ports:
-      # 11500 no host (não 11434) — testado na prática (2026-08-09) que uma
-      # instalação nativa do Ollama no Windows (fora do Docker) escuta
-      # 127.0.0.1:11434 especificamente, "roubando" conexões IPv4 pra
-      # "localhost:11434" mesmo com o container publicando a mesma porta
-      # (o bind mais específico do Windows vence o wildcard do Docker
-      # Desktop) — resultado é um 404 "model not found" bem confuso,
-      # porque cai num Ollama diferente do que a gente configurou. Dentro
-      # da rede Docker os serviços continuam falando "ollama:11434"
-      # normalmente, só o acesso pelo host muda (mesmo padrão do mysql,
-      # ver comentário acima).
-      - "11500:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    networks: [financas-net]
+  # Provedor de LLM (ADR-0002) — ADR-0029: Ollama deixou de rodar local
+  # (container neste compose) e passou a rodar no servidor de produção,
+  # numa RTX 5070 Ti dedicada. Motivo: inferência em CPU só (sem GPU)
+  # media ~4 tokens/s e só processava UMA geração por vez — chat e
+  # extração de fatura brigavam pelo mesmo slot e estouravam timeout uma
+  # da outra (achado real, 2026-08-11). Com GPU: ~127 tokens/s, 4 slots
+  # paralelos, os dois cenários resolvidos concorrentemente em segundos.
+  # `document-service`/`ai-service` agora apontam pra lá via
+  # `OLLAMA_SERVER_URL` (ver `.env`, nunca versionado — endereço de rede
+  # interna não entra em arquivo commitado, mesma regra de sempre).
 
   # ================= Identidade =================
   keycloak:
@@ -245,7 +232,6 @@ services:
       mysql: { condition: service_healthy }
       mongo: { condition: service_started }
       kafka: { condition: service_started }
-      ollama: { condition: service_started }
       card-service: { condition: service_started }
     environment:
       DB_URL: jdbc:mysql://mysql:3306/document_db
@@ -257,10 +243,10 @@ services:
       # Fatura de cartão passou a religar direto no card-service (ADR-0028,
       # não mais no account-service — a integração antiga foi removida).
       CARD_SERVICE_URL: http://card-service:8083
-      # OLLAMA_BASE_URL não precisa ser setado — application.properties já
-      # tem default "http://ollama:11434" (hostname interno da rede Docker,
-      # ver comentário no serviço ollama acima sobre a porta 11500 ser só
-      # pro acesso pelo host).
+      # Ollama agora roda no servidor (GPU dedicada), não mais neste compose
+      # — ADR-0029. Endereço real (IP da rede local) só em `.env`
+      # (gitignored), nunca aqui — mesma regra de sempre pra dado de rede.
+      OLLAMA_BASE_URL: ${OLLAMA_SERVER_URL}
       OTEL_ENDPOINT: http://otel-collector:4317
     ports:
       - "8084:8084"
@@ -298,7 +284,6 @@ services:
       mongo: { condition: service_started }
       qdrant: { condition: service_started }
       kafka: { condition: service_started }
-      ollama: { condition: service_started }
       account-service: { condition: service_started }
       budget-service: { condition: service_started }
       card-service: { condition: service_started }
@@ -312,13 +297,48 @@ services:
       BUDGET_SERVICE_URL: http://budget-service:8085
       CARD_SERVICE_URL: http://card-service:8083
       TRANSACTION_SERVICE_URL: http://transaction-service:8082
-      # OLLAMA_BASE_URL não precisa ser setado — application.properties já
-      # tem default "http://ollama:11434" (mesmo motivo do document-service,
-      # ver comentário no serviço ollama acima sobre a porta 11500 ser só
-      # pro acesso pelo host). AI_SERVICE_CRIPTOGRAFIA_CHAVE também não —
+      # Ollama agora roda no servidor (GPU dedicada), não mais neste compose
+      # — ADR-0029. Endereço real (IP da rede local) só em `.env`
+      # (gitignored), nunca aqui. AI_SERVICE_CRIPTOGRAFIA_CHAVE também não —
       # default de dev já embutido no application.properties, produção usa
       # Vault (docs/architecture/security.md).
+      OLLAMA_BASE_URL: ${OLLAMA_SERVER_URL}
       OTEL_ENDPOINT: http://otel-collector:4317
     ports:
       - "8086:8086"
+    networks: [financas-net]
+
+  web:
+    build:
+      context: ./services/web
+      dockerfile: Dockerfile
+    container_name: financas-web
+    depends_on:
+      keycloak: { condition: service_started }
+      account-service: { condition: service_started }
+      transaction-service: { condition: service_started }
+      card-service: { condition: service_started }
+      document-service: { condition: service_started }
+      budget-service: { condition: service_started }
+      ai-service: { condition: service_started }
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:-Bw/IG0xCGSqVzl1IyUPZ2nsDrVXV8jy3+oa6K23zT6IO}
+      AUTH_TRUST_HOST: "true"
+      AUTH_URL: http://localhost:3000
+      AUTH_KEYCLOAK_ID: web-app
+      # Alcançável só pelo navegador (redirect de login/logout) — o
+      # servidor Next.js roda dentro deste container, que não alcança
+      # "localhost:8080" (é o próprio container). Ver auth.ts.
+      AUTH_KEYCLOAK_ISSUER: http://localhost:8080/realms/financas
+      # Alcançável pelo servidor (dentro da rede Docker) — troca/renovação
+      # de token, userinfo, jwks. Ver auth.ts.
+      AUTH_KEYCLOAK_INTERNAL_ISSUER: http://keycloak:8080/realms/financas
+      ACCOUNT_SERVICE_URL: http://account-service:8081
+      TRANSACTION_SERVICE_URL: http://transaction-service:8082
+      CARD_SERVICE_URL: http://card-service:8083
+      DOCUMENT_SERVICE_URL: http://document-service:8084
+      BUDGET_SERVICE_URL: http://budget-service:8085
+      AI_SERVICE_URL: http://ai-service:8086
+    ports:
+      - "3000:3000"
     networks: [financas-net]
