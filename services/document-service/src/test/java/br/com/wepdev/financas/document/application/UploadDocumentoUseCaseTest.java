@@ -24,6 +24,7 @@ class UploadDocumentoUseCaseTest {
     private final UploadDocumentoUseCase useCase = new UploadDocumentoUseCase(repository, processador, executor);
 
     private final UUID usuarioId = UUID.randomUUID();
+    private final UUID cartaoId = UUID.randomUUID();
 
     @Test
     void deveriaPersistirComoRecebido_eDespacharProcessamentoEmBackground() {
@@ -33,7 +34,8 @@ class UploadDocumentoUseCaseTest {
         });
 
         UploadDocumentoCommand command = new UploadDocumentoCommand(
-                usuarioId, TipoDocumento.FATURA_CARTAO, "fatura.pdf", "conteudo-pdf".getBytes(), "senha123", "JOAO");
+                usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId, "fatura.pdf", "conteudo-pdf".getBytes(), "senha123",
+                "JOAO");
 
         DocumentoImportado documento = useCase.executar(command);
 
@@ -52,7 +54,7 @@ class UploadDocumentoUseCaseTest {
         when(executor.runAsync(any(Runnable.class))).thenReturn(CompletableFuture.completedFuture(null));
 
         useCase.executar(new UploadDocumentoCommand(
-                usuarioId, TipoDocumento.FATURA_CARTAO, "fatura.pdf", "conteudo".getBytes(), null, null));
+                usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId, "fatura.pdf", "conteudo".getBytes(), null, null));
 
         ordem.verify(repository).salvar(any());
         ordem.verify(executor).runAsync(any(Runnable.class));

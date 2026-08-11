@@ -13,13 +13,18 @@ import java.time.temporal.ChronoUnit;
 public interface OllamaRestClient {
 
     /**
-     * Timeout generoso — inferência local em CPU é lenta (chamada de teste
-     * real levou ~34s pro llama3.1 carregar + responder, ver
-     * docs/historico.md 2026-08-09). Modelo fica carregado em memória entre
-     * chamadas, então só a primeira costuma ser tão lenta assim.
+     * Timeout generoso — inferência local em CPU é lenta. Testado na
+     * prática em 2026-08-10 com uma fatura real (test-data/fatura_teste_nubank.pdf,
+     * llama3.1 8B em CPU): nem 120s nem 300s foram suficientes — extração
+     * de fatura completa (prompt grande) é bem mais lenta que uma pergunta
+     * curta de chat (~8s, ver docs/historico.md fatia 6 item 9). Subido
+     * pra 600s (10min) como margem de segurança; se ainda não bastar, o
+     * gargalo real é a velocidade de inferência em CPU, não o timeout —
+     * nesse caso vale considerar modelo menor/quantizado, ou GPU, antes de
+     * simplesmente subir o número de novo.
      */
     @POST
     @Path("/api/generate")
-    @Timeout(value = 120, unit = ChronoUnit.SECONDS)
+    @Timeout(value = 600, unit = ChronoUnit.SECONDS)
     OllamaGenerateResponseDto gerar(OllamaGenerateRequestDto request);
 }

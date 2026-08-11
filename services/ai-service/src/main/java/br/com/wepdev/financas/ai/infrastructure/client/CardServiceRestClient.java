@@ -1,6 +1,8 @@
 package br.com.wepdev.financas.ai.infrastructure.client;
 
 import br.com.wepdev.financas.ai.infrastructure.client.dto.CartaoDto;
+import br.com.wepdev.financas.ai.infrastructure.client.dto.CompraResumoDto;
+import br.com.wepdev.financas.ai.infrastructure.client.dto.FaturaDetalheDto;
 import br.com.wepdev.financas.ai.infrastructure.client.dto.FaturaDto;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -31,4 +33,16 @@ public interface CardServiceRestClient {
     @Retry(maxRetries = 2, delay = 200, delayUnit = ChronoUnit.MILLIS)
     @Timeout(value = 3, unit = ChronoUnit.SECONDS)
     List<FaturaDto> listarFaturas(@PathParam("id") UUID cartaoId, @QueryParam("status") String status);
+
+    @GET
+    @Path("/api/v1/faturas/{id}")
+    @Retry(maxRetries = 2, delay = 200, delayUnit = ChronoUnit.MILLIS)
+    @Timeout(value = 3, unit = ChronoUnit.SECONDS)
+    FaturaDetalheDto buscarFatura(@PathParam("id") UUID faturaId);
+
+    @GET
+    @Path("/api/v1/cartoes/{id}/compras")
+    @Retry(maxRetries = 2, delay = 200, delayUnit = ChronoUnit.MILLIS)
+    @Timeout(value = 3, unit = ChronoUnit.SECONDS)
+    List<CompraResumoDto> listarCompras(@PathParam("id") UUID cartaoId);
 }

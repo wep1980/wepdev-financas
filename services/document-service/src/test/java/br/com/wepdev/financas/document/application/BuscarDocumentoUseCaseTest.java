@@ -20,10 +20,11 @@ class BuscarDocumentoUseCaseTest {
     private final BuscarDocumentoUseCase useCase = new BuscarDocumentoUseCase(repository);
 
     private final UUID usuarioId = UUID.randomUUID();
+    private final UUID cartaoId = UUID.randomUUID();
 
     @Test
     void deveriaRetornarDocumento_quandoEncontrado() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, "a.pdf", "x".getBytes());
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId, "a.pdf", "x".getBytes());
         when(repository.buscarPorId(documento.getId(), usuarioId)).thenReturn(Optional.of(documento));
 
         assertThat(useCase.executar(documento.getId(), usuarioId)).isEqualTo(documento);

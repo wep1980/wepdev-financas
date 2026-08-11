@@ -50,6 +50,12 @@ public class LancamentoPendenteEntity {
     @Column(name = "categoria_sugerida")
     public String categoriaSugerida;
 
+    @Column(name = "numero_parcela", nullable = false)
+    public int numeroParcela;
+
+    @Column(name = "quantidade_parcelas", nullable = false)
+    public int quantidadeParcelas;
+
     @Enumerated(EnumType.STRING)
     @Column(length = 10, nullable = false)
     public StatusLancamento status;

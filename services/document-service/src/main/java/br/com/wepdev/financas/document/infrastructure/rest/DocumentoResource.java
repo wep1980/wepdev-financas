@@ -73,6 +73,15 @@ public class DocumentoResource {
                     .build();
         }
 
+        UUID cartaoId;
+        try {
+            cartaoId = UUID.fromString(form.cartaoId);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(new ErroResponse("cartaoId é obrigatório e precisa ser um UUID válido"))
+                    .build();
+        }
+
         byte[] conteudo;
         try {
             conteudo = Files.readAllBytes(form.arquivo.filePath());
@@ -81,7 +90,8 @@ public class DocumentoResource {
         }
 
         DocumentoImportado documento = uploadUseCase.executar(new UploadDocumentoCommand(
-                usuarioIdAutenticado(), tipo, form.arquivo.fileName(), conteudo, form.senha, form.nomeFiltro));
+                usuarioIdAutenticado(), tipo, cartaoId, form.arquivo.fileName(), conteudo, form.senha,
+                nomeUsuarioAutenticado()));
 
         return Response.status(Response.Status.ACCEPTED)
                 .entity(DocumentoImportadoResponse.de(documento))
@@ -111,7 +121,7 @@ public class DocumentoResource {
     @Consumes(MediaType.APPLICATION_JSON)
     public Response confirmar(@PathParam("id") UUID id, @Valid ConfirmarLancamentosRequest request) {
         confirmarUseCase.executar(new ConfirmarLancamentosCommand(
-                id, usuarioIdAutenticado(), request.contaId(), request.lancamentoIdsConfirmados()));
+                id, usuarioIdAutenticado(), request.lancamentoIdsConfirmados()));
         return Response.noContent().build();
     }
 
@@ -121,5 +131,21 @@ public class DocumentoResource {
             return UUID.fromString(jwt.getSubject());
         }
         throw new IllegalStateException("Token autenticado não é um JWT com claim 'sub'");
+    }
+
+    /**
+     * Nome completo do usuário logado (claim "name" do Keycloak) — usado
+     * como {@code nomeFiltro} da extração (ver AgenteExtracaoFaturaService),
+     * pra restringir automaticamente a fatura à seção do titular certo
+     * quando ela lista mais de uma pessoa (2026-08-11, regra de negócio
+     * explícita — nunca pedido manualmente no upload). Nulo se o claim não
+     * vier no token — nesse caso a extração cai pro comportamento de "fatura
+     * de uma pessoa só" (ver {@code recortarSecaoDoNome}).
+     */
+    private String nomeUsuarioAutenticado() {
+        if (identity.getPrincipal() instanceof JsonWebToken jwt) {
+            return jwt.getClaim("name");
+        }
+        return null;
     }
 }

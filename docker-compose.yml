@@ -246,7 +246,7 @@ services:
       mongo: { condition: service_started }
       kafka: { condition: service_started }
       ollama: { condition: service_started }
-      account-service: { condition: service_started }
+      card-service: { condition: service_started }
     environment:
       DB_URL: jdbc:mysql://mysql:3306/document_db
       DB_USER: ${MYSQL_USER:-financas}
@@ -254,7 +254,9 @@ services:
       MONGO_URL: mongodb://${MONGO_ROOT_USER:-financas}:${MONGO_ROOT_PASSWORD:-financas}@mongo:27017
       KAFKA_BOOTSTRAP: kafka:9092
       KEYCLOAK_URL: http://keycloak:8080
-      ACCOUNT_SERVICE_URL: http://account-service:8081
+      # Fatura de cartão passou a religar direto no card-service (ADR-0028,
+      # não mais no account-service — a integração antiga foi removida).
+      CARD_SERVICE_URL: http://card-service:8083
       # OLLAMA_BASE_URL não precisa ser setado — application.properties já
       # tem default "http://ollama:11434" (hostname interno da rede Docker,
       # ver comentário no serviço ollama acima sobre a porta 11500 ser só

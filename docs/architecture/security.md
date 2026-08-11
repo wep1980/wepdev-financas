@@ -44,6 +44,7 @@ deve resultar numa linha nova aqui.
 | Token de leitura do `ghcr.io` (se o registry for privado) | ADR-0018 | GitHub Actions Secrets |
 | Token do túnel Cloudflare (Cloudflare Zero Trust) | ADR-0019 | Já gerenciado pelo usuário fora do repositório (mesmo mecanismo do portfólio) — nunca commitado |
 | Chave SSH que o Kamal usa pra conectar em `localhost` (roda a partir do runner self-hosted) | ADR-0021 | Local ao servidor — não é um segredo que trafega pela internet, mas ainda assim nunca versionada |
+| `AUTH_SECRET` (assina/criptografa o cookie de sessão do Auth.js no `web`) | ADR-0027 | `.env.local` (dev, default gerado documentado como não-sensível) / Vault (prod) |
 
 ## 3. Autenticação e autorização
 

@@ -14,28 +14,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DocumentoImportadoTest {
 
     private final UUID usuarioId = UUID.randomUUID();
+    private final UUID cartaoId = UUID.randomUUID();
     private final byte[] conteudo = "conteudo-pdf-fake".getBytes();
 
     @Test
     void deveriaReceberComoRecebidoSemLancamento() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
                 "fatura-agosto.pdf", conteudo);
 
         assertThat(documento.getStatus()).isEqualTo(StatusDocumento.RECEBIDO);
         assertThat(documento.getLancamentos()).isEmpty();
         assertThat(documento.getId()).isNotNull();
+        assertThat(documento.getCartaoId()).isEqualTo(cartaoId);
     }
 
     @Test
     void deveriaLancarExcecao_quandoConteudoArquivoVazio() {
-        assertThatThrownBy(() -> DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, "fatura.pdf",
-                new byte[0]))
+        assertThatThrownBy(() -> DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
+                "fatura.pdf", new byte[0]))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void deveriaIniciarProcessamento_eSerIdempotente() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
                 "fatura.pdf", conteudo);
 
         documento.iniciarProcessamento();
@@ -47,10 +49,10 @@ class DocumentoImportadoTest {
 
     @Test
     void deveriaConcluirComLancamentos_eFicarAguardandoConfirmacao() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
                 "fatura.pdf", conteudo);
         LancamentoPendente lancamento = LancamentoPendente.extrair(documento.getId(), "Mercado",
-                new BigDecimal("100.00"), LocalDate.of(2026, 8, 5), TipoLancamento.DESPESA, "Alimentação");
+                new BigDecimal("100.00"), LocalDate.of(2026, 8, 5), TipoLancamento.DESPESA, "Alimentação", 1, 1);
 
         documento.concluirComLancamentos(List.of(lancamento));
 
@@ -61,7 +63,7 @@ class DocumentoImportadoTest {
 
     @Test
     void deveriaLancarExcecao_quandoConcluirComListaVazia() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
                 "fatura.pdf", conteudo);
 
         assertThatThrownBy(() -> documento.concluirComLancamentos(List.of()))
@@ -70,7 +72,7 @@ class DocumentoImportadoTest {
 
     @Test
     void deveriaMarcarErro() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
                 "fatura.pdf", conteudo);
 
         documento.marcarErro("PDF ilegível");
@@ -82,12 +84,12 @@ class DocumentoImportadoTest {
 
     @Test
     void deveriaConfirmarLancamentosSelecionados_eRejeitarOsDemais() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
                 "fatura.pdf", conteudo);
         LancamentoPendente confirmado = LancamentoPendente.extrair(documento.getId(), "Mercado",
-                new BigDecimal("100.00"), LocalDate.of(2026, 8, 5), TipoLancamento.DESPESA, "Alimentação");
+                new BigDecimal("100.00"), LocalDate.of(2026, 8, 5), TipoLancamento.DESPESA, "Alimentação", 1, 1);
         LancamentoPendente rejeitado = LancamentoPendente.extrair(documento.getId(), "Assinatura duvidosa",
-                new BigDecimal("50.00"), LocalDate.of(2026, 8, 6), TipoLancamento.DESPESA, null);
+                new BigDecimal("50.00"), LocalDate.of(2026, 8, 6), TipoLancamento.DESPESA, null, 1, 1);
         documento.concluirComLancamentos(List.of(confirmado, rejeitado));
 
         documento.confirmar(Set.of(confirmado.getId()));
@@ -100,10 +102,10 @@ class DocumentoImportadoTest {
 
     @Test
     void deveriaSerIdempotente_aoConfirmarDocumentoJaConfirmado() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
                 "fatura.pdf", conteudo);
         LancamentoPendente lancamento = LancamentoPendente.extrair(documento.getId(), "Mercado",
-                new BigDecimal("100.00"), LocalDate.of(2026, 8, 5), TipoLancamento.DESPESA, "Alimentação");
+                new BigDecimal("100.00"), LocalDate.of(2026, 8, 5), TipoLancamento.DESPESA, "Alimentação", 1, 1);
         documento.concluirComLancamentos(List.of(lancamento));
         documento.confirmar(Set.of(lancamento.getId()));
 
@@ -115,7 +117,7 @@ class DocumentoImportadoTest {
 
     @Test
     void naoDeveriaConfirmar_quandoAindaNaoAguardandoConfirmacao() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId,
                 "fatura.pdf", conteudo);
 
         assertThatThrownBy(() -> documento.confirmar(Set.of()))

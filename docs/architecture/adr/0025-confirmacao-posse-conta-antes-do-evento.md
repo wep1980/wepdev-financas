@@ -1,6 +1,10 @@
 # ADR-0025: Posse da conta é confirmada no document-service, antes do evento — o consumer Kafka não reverifica
 
-Status: Aceita
+Status: Aceita, mas **não se aplica mais a `FATURA_CARTAO`** desde a
+ADR-0028 (2026-08-11) — fatura de cartão parou de publicar esse evento
+(religada pro card-service). Continua valendo pro dia em que
+`EXTRATO_BANCARIO`/`BOLETO_FINANCIAMENTO` forem implementados (esses
+tipos continuam no fluxo de evento Kafka descrito aqui).
 Data: 2026-08-09
 
 ## Contexto

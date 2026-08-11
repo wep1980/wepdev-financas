@@ -23,6 +23,9 @@ public class DocumentoImportadoEntity {
 
     public String tipo;
 
+    /** Cartão (card-service) que essa fatura pertence — ver ADR-0028. */
+    public UUID cartaoId;
+
     public String nomeArquivo;
 
     public byte[] conteudoArquivo;

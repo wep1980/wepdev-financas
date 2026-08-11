@@ -1,6 +1,9 @@
 # ADR-0023: Escopo da primeira fatia do `document-service` — sem integração com card-service
 
-Status: Aceita
+Status: Aceita, **item 1 superado pela ADR-0028** (2026-08-11 — usuário
+pediu exatamente o cruzamento com card-service previsto como possível
+adiante, na seção Consequências abaixo). Item 2 (PDFBox) continua valendo
+sem mudança.
 Data: 2026-08-09
 
 ## Contexto

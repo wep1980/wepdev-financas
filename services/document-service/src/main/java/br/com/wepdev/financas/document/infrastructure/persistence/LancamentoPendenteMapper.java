@@ -21,6 +21,8 @@ final class LancamentoPendenteMapper {
         entity.data = lancamento.getData();
         entity.tipo = lancamento.getTipo();
         entity.categoriaSugerida = lancamento.getCategoriaSugerida();
+        entity.numeroParcela = lancamento.getNumeroParcela();
+        entity.quantidadeParcelas = lancamento.getQuantidadeParcelas();
         entity.status = lancamento.getStatus();
     }
 
@@ -33,6 +35,8 @@ final class LancamentoPendenteMapper {
                 entity.data,
                 entity.tipo,
                 entity.categoriaSugerida,
+                entity.numeroParcela,
+                entity.quantidadeParcelas,
                 entity.status
         );
     }

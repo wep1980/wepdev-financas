@@ -10,15 +10,19 @@ import java.util.UUID;
 /**
  * Aggregate root. Nunca cria transação sozinho — produz {@link LancamentoPendente}s
  * candidatos a partir do documento enviado, e só quando o usuário confirma
- * (via {@link #confirmar(Set)}) é que o caso de uso publica o evento Kafka
- * que o transaction-service consome (ver {@code overview.md} seção 3 e
- * ADR-0023).
+ * (via {@link #confirmar(Set)}) é que o caso de uso lança as compras
+ * novas no {@code card-service} (ADR-0028, 2026-08-11) — cada
+ * lançamento confirmado vira uma compra à vista ou parcelada em
+ * {@code cartaoId}, nunca uma transação avulsa direta. Compra já
+ * conhecida de um upload anterior é ignorada (dedup, ver
+ * {@code ConfirmarLancamentosUseCase}).
  */
 public class DocumentoImportado {
 
     private final UUID id;
     private final UUID usuarioId;
     private final TipoDocumento tipo;
+    private final UUID cartaoId;
     private final String nomeArquivo;
     private final byte[] conteudoArquivo;
     private StatusDocumento status;
@@ -27,12 +31,13 @@ public class DocumentoImportado {
     private final Instant criadoEm;
     private Instant processadoEm;
 
-    private DocumentoImportado(UUID id, UUID usuarioId, TipoDocumento tipo, String nomeArquivo, byte[] conteudoArquivo,
-                                StatusDocumento status, String mensagemErro, List<LancamentoPendente> lancamentos,
-                                Instant criadoEm, Instant processadoEm) {
+    private DocumentoImportado(UUID id, UUID usuarioId, TipoDocumento tipo, UUID cartaoId, String nomeArquivo,
+                                byte[] conteudoArquivo, StatusDocumento status, String mensagemErro,
+                                List<LancamentoPendente> lancamentos, Instant criadoEm, Instant processadoEm) {
         this.id = id;
         this.usuarioId = usuarioId;
         this.tipo = tipo;
+        this.cartaoId = cartaoId;
         this.nomeArquivo = nomeArquivo;
         this.conteudoArquivo = conteudoArquivo;
         this.status = status;
@@ -43,9 +48,11 @@ public class DocumentoImportado {
     }
 
     /** Nasce RECEBIDO, sem lançamento nenhum — o caso de uso de upload processa e chama concluirComLancamentos/marcarErro em seguida. */
-    public static DocumentoImportado receber(UUID usuarioId, TipoDocumento tipo, String nomeArquivo, byte[] conteudoArquivo) {
+    public static DocumentoImportado receber(UUID usuarioId, TipoDocumento tipo, UUID cartaoId, String nomeArquivo,
+                                              byte[] conteudoArquivo) {
         Objects.requireNonNull(usuarioId, "usuarioId é obrigatório");
         Objects.requireNonNull(tipo, "tipo é obrigatório");
+        Objects.requireNonNull(cartaoId, "cartaoId é obrigatório");
         Objects.requireNonNull(nomeArquivo, "nomeArquivo é obrigatório");
         Objects.requireNonNull(conteudoArquivo, "conteudoArquivo é obrigatório");
         if (nomeArquivo.isBlank()) {
@@ -54,17 +61,17 @@ public class DocumentoImportado {
         if (conteudoArquivo.length == 0) {
             throw new IllegalArgumentException("conteudoArquivo não pode ser vazio");
         }
-        return new DocumentoImportado(UUID.randomUUID(), usuarioId, tipo, nomeArquivo, conteudoArquivo,
+        return new DocumentoImportado(UUID.randomUUID(), usuarioId, tipo, cartaoId, nomeArquivo, conteudoArquivo,
                 StatusDocumento.RECEBIDO, null, List.of(), Instant.now(), null);
     }
 
     /** Reconstrói um documento já existente (vindo da persistência) — não valida como se fosse criação nova. */
-    public static DocumentoImportado reconstituir(UUID id, UUID usuarioId, TipoDocumento tipo, String nomeArquivo,
-                                                   byte[] conteudoArquivo, StatusDocumento status, String mensagemErro,
-                                                   List<LancamentoPendente> lancamentos, Instant criadoEm,
-                                                   Instant processadoEm) {
-        return new DocumentoImportado(id, usuarioId, tipo, nomeArquivo, conteudoArquivo, status, mensagemErro,
-                lancamentos, criadoEm, processadoEm);
+    public static DocumentoImportado reconstituir(UUID id, UUID usuarioId, TipoDocumento tipo, UUID cartaoId,
+                                                   String nomeArquivo, byte[] conteudoArquivo, StatusDocumento status,
+                                                   String mensagemErro, List<LancamentoPendente> lancamentos,
+                                                   Instant criadoEm, Instant processadoEm) {
+        return new DocumentoImportado(id, usuarioId, tipo, cartaoId, nomeArquivo, conteudoArquivo, status,
+                mensagemErro, lancamentos, criadoEm, processadoEm);
     }
 
     /** Só sai de RECEBIDO — chamar de novo depois de já PROCESSANDO não faz nada. */
@@ -136,6 +143,10 @@ public class DocumentoImportado {
 
     public TipoDocumento getTipo() {
         return tipo;
+    }
+
+    public UUID getCartaoId() {
+        return cartaoId;
     }
 
     public String getNomeArquivo() {

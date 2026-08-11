@@ -7,6 +7,7 @@ import br.com.wepdev.financas.ai.domain.BudgetServiceClient;
 import br.com.wepdev.financas.ai.domain.CardServiceClient;
 import br.com.wepdev.financas.ai.domain.Cartao;
 import br.com.wepdev.financas.ai.domain.ChatRequest;
+import br.com.wepdev.financas.ai.domain.CompraResumo;
 import br.com.wepdev.financas.ai.domain.ConfiguracaoIa;
 import br.com.wepdev.financas.ai.domain.ConfiguracaoIaRepository;
 import br.com.wepdev.financas.ai.domain.Conta;
@@ -21,6 +22,7 @@ import br.com.wepdev.financas.ai.domain.FrequenciaRecorrencia;
 import br.com.wepdev.financas.ai.domain.Intencao;
 import br.com.wepdev.financas.ai.domain.LlmProvider;
 import br.com.wepdev.financas.ai.domain.LlmProviderFactory;
+import br.com.wepdev.financas.ai.domain.Parcela;
 import br.com.wepdev.financas.ai.domain.PeriodoReferencia;
 import br.com.wepdev.financas.ai.domain.ResultadoBusca;
 import br.com.wepdev.financas.ai.domain.ResumoCategoria;
@@ -40,8 +42,11 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -73,11 +78,19 @@ public class AgenteOrquestradorUseCase {
             Tools disponíveis:
             - buscar_saldo_disponivel: quanto tem disponível pra gastar no mês
             - resumo_gastos_por_categoria: quanto gastou por categoria, comparado ao período anterior
-            - buscar_fatura_cartao: valor e vencimento de fatura de cartão de crédito
+            - buscar_fatura_cartao: valor e vencimento da fatura fechada mais recente de cartão de crédito
             - buscar_transacoes: buscar transações específicas por descrição
+            - compras_parceladas: quantas compras parceladas estão ativas, quanto falta de cada uma, qual a maior parcela
+            - valor_fatura_mes: valor da fatura de um mês específico, separado em parcelado e à vista
+            - categoria_que_mais_gastou: qual categoria teve mais gasto num período (inclui compras de cartão, não só transações)
+            - capacidades_do_assistente: "no que você pode me ajudar" ou pergunta parecida sobre o que o assistente faz
+
+            Exemplo: pra "no que você pode me ajudar?", responda exatamente
+            {"intent": "CONSULTA", "tool": "capacidades_do_assistente", "periodo": null}
+            — "capacidades_do_assistente" é sempre o valor de "tool", nunca o valor de "intent".
 
             Períodos disponíveis (use quando a pergunta mencionar um período, senão null):
-            MES_ATUAL, MES_PASSADO, ULTIMOS_3_MESES
+            MES_ATUAL, MES_PASSADO, ULTIMOS_3_MESES, PROXIMO_MES (só faz sentido pra valor_fatura_mes)
 
             Se for um comando pra criar uma receita ou despesa (nova ou recorrente), responda:
             {"intent": "ACAO"}
@@ -285,6 +298,10 @@ public class AgenteOrquestradorUseCase {
             case RESUMO_CATEGORIA -> responderResumoCategoria(periodo, trace);
             case FATURA_CARTAO -> responderFaturaCartao(trace);
             case TRANSACOES -> responderTransacoes(comando.usuarioId(), comando.mensagem(), trace);
+            case COMPRAS_PARCELADAS -> responderComprasParceladas(trace);
+            case VALOR_FATURA_MES -> responderValorFaturaMes(intencaoDetectada.periodo(), trace);
+            case CATEGORIA_MAIS_GASTOU -> responderCategoriaMaisGastou(periodo, trace);
+            case CAPACIDADES -> responderCapacidades();
         };
 
         conversa.adicionarRespostaAgente(resposta, TipoRespostaAgente.RESPOSTA);
@@ -343,6 +360,137 @@ public class AgenteOrquestradorUseCase {
                 + ", vence em " + fatura.dataVencimento() + ".";
     }
 
+    /**
+     * Lista as compras parceladas ainda ativas (não finalizadas) de todos
+     * os cartões do usuário. Não filtra por nome de compra específica —
+     * se o usuário perguntar "quantas parcelas faltam da compra X", a
+     * resposta vem como a lista inteira e ele identifica a compra dele
+     * nela (simplificação consciente: evitar mais uma extração de
+     * parâmetro livre do LLM só pra essa pergunta, 2026-08-11).
+     */
+    private String responderComprasParceladas(List<RegistroTrace> trace) {
+        List<Cartao> cartoes = cardServiceClient.buscarCartoesAtivos();
+        trace.add(new RegistroTrace("compras_parceladas", "card-service"));
+        if (cartoes.isEmpty()) {
+            return "Você não tem cartão cadastrado.";
+        }
+
+        List<CompraResumo> ativas = cartoes.stream()
+                .flatMap(cartao -> cardServiceClient.listarCompras(cartao.id()).stream())
+                .filter(compra -> compra.quantidadeParcelas() > 1 && !compra.finalizada())
+                .toList();
+        if (ativas.isEmpty()) {
+            return "Você não tem nenhuma compra parcelada em andamento.";
+        }
+
+        String detalhe = ativas.stream()
+                .map(c -> c.descricao() + " (R$" + formatarValor(c.valorParcela()) + "/mês, faltam "
+                        + c.parcelasRestantes() + " de " + c.quantidadeParcelas() + " parcelas)")
+                .collect(Collectors.joining("; "));
+        BigDecimal maiorParcela = ativas.stream().map(CompraResumo::valorParcela).max(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
+
+        return "Você tem " + ativas.size() + " compra(s) parcelada(s) em andamento: " + detalhe + ". "
+                + "A maior parcela é de R$" + formatarValor(maiorParcela) + ".";
+    }
+
+    /**
+     * Valor da fatura de um mês específico, separado em parcelado vs à
+     * vista — soma sempre bate com fatura.valorTotal() (toda Parcela
+     * lançada incrementa o total, ver Fatura.adicionarParcela no
+     * card-service). v1: primeiro cartão ativo (mesma limitação de
+     * responderFaturaCartao, ver docs/tasks.md item 8).
+     */
+    private String responderValorFaturaMes(String periodoTexto, List<RegistroTrace> trace) {
+        List<Cartao> cartoes = cardServiceClient.buscarCartoesAtivos();
+        if (cartoes.isEmpty()) {
+            return "Você não tem cartão cadastrado.";
+        }
+        Cartao cartao = cartoes.get(0);
+        YearMonth competencia = competenciaFatura(periodoTexto);
+        trace.add(new RegistroTrace("valor_fatura_mes", "card-service, competência " + competencia));
+
+        Optional<Fatura> faturaEncontrada = cardServiceClient.buscarFaturas(cartao.id(), null).stream()
+                .filter(f -> f.competencia().equals(competencia))
+                .findFirst();
+        if (faturaEncontrada.isEmpty()) {
+            return "Não encontrei fatura do cartão " + cartao.apelido() + " pra " + competencia + ".";
+        }
+        Fatura fatura = faturaEncontrada.get();
+
+        List<Parcela> parcelas = cardServiceClient.buscarParcelasDaFatura(fatura.id());
+        BigDecimal parcelado = parcelas.stream()
+                .filter(p -> p.quantidadeParcelas() > 1)
+                .map(Parcela::valor).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal aVista = parcelas.stream()
+                .filter(p -> p.quantidadeParcelas() == 1)
+                .map(Parcela::valor).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return "A fatura do cartão " + cartao.apelido() + " pra " + competencia + " é de R$"
+                + formatarValor(fatura.valorTotal()) + " (R$" + formatarValor(parcelado)
+                + " em compras parceladas, R$" + formatarValor(aVista) + " em compras à vista).";
+    }
+
+    /** MES_ATUAL/nulo/valor desconhecido caem no mês atual — PROXIMO_MES só existe pra essa tool. */
+    private YearMonth competenciaFatura(String periodoTexto) {
+        if (periodoTexto == null) {
+            return YearMonth.now();
+        }
+        return switch (periodoTexto.toUpperCase()) {
+            case "MES_PASSADO" -> YearMonth.now().minusMonths(1);
+            case "PROXIMO_MES" -> YearMonth.now().plusMonths(1);
+            default -> YearMonth.now();
+        };
+    }
+
+    /**
+     * Combina transaction-service (transações avulsas/recorrentes) e
+     * card-service (compras de cartão, que não geram Transacao — só são
+     * debitadas ao pagar a fatura, ver ADR-0028 no document-service) pra
+     * responder "qual categoria eu mais gastei" de verdade — só olhar
+     * transaction-service subestimaria qualquer usuário que usa cartão.
+     */
+    private String responderCategoriaMaisGastou(PeriodoReferencia periodo, List<RegistroTrace> trace) {
+        List<ResumoCategoria> resumoTransacoes = transactionServiceClient.buscarResumoPorCategoria(periodo.inicio(), periodo.fim());
+        trace.add(new RegistroTrace("categoria_que_mais_gastou", "transaction-service + card-service, " + periodo.inicio() + " a " + periodo.fim()));
+
+        Map<String, BigDecimal> totalPorCategoria = new LinkedHashMap<>();
+        for (ResumoCategoria r : resumoTransacoes) {
+            totalPorCategoria.merge(r.categoria(), r.totalGasto(), BigDecimal::add);
+        }
+
+        YearMonth inicio = YearMonth.from(periodo.inicio());
+        YearMonth fim = YearMonth.from(periodo.fim());
+        for (Cartao cartao : cardServiceClient.buscarCartoesAtivos()) {
+            for (Fatura fatura : cardServiceClient.buscarFaturas(cartao.id(), null)) {
+                if (fatura.competencia().isBefore(inicio) || fatura.competencia().isAfter(fim)) {
+                    continue;
+                }
+                for (Parcela parcela : cardServiceClient.buscarParcelasDaFatura(fatura.id())) {
+                    String categoria = (parcela.categoria() == null || parcela.categoria().isBlank())
+                            ? "Sem categoria" : parcela.categoria();
+                    totalPorCategoria.merge(categoria, parcela.valor(), BigDecimal::add);
+                }
+            }
+        }
+
+        if (totalPorCategoria.isEmpty()) {
+            return "Não encontrei gastos nesse período.";
+        }
+        Map.Entry<String, BigDecimal> maior = totalPorCategoria.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .orElseThrow();
+        return "O tipo de gasto que mais teve nesse período foi " + maior.getKey() + ", com R$"
+                + formatarValor(maior.getValue()) + " (somando transações e compras de cartão).";
+    }
+
+    private String responderCapacidades() {
+        return "Posso responder sobre: saldo disponível pra gastar no mês, resumo de gastos por categoria, "
+                + "valor e vencimento de fatura de cartão (total, só parcelado ou só à vista, de um mês específico), "
+                + "compras parceladas em andamento (quantas, maior parcela, quanto falta de cada uma), qual categoria "
+                + "você mais gastou, e buscar transações específicas. Também posso criar uma receita ou despesa "
+                + "(avulsa ou recorrente) se você pedir — sempre confirmando antes de executar.";
+    }
+
     private String responderTransacoes(UUID usuarioId, String mensagemOriginal, List<RegistroTrace> trace) {
         List<ResultadoBusca> resultados = buscarTransacoesSimilaresUseCase.executar(usuarioId, mensagemOriginal, 5);
         trace.add(new RegistroTrace("buscar_transacoes", "busca semântica no Qdrant"));
@@ -399,6 +547,10 @@ public class AgenteOrquestradorUseCase {
             case "resumo_gastos_por_categoria" -> Optional.of(ToolConsulta.RESUMO_CATEGORIA);
             case "buscar_fatura_cartao" -> Optional.of(ToolConsulta.FATURA_CARTAO);
             case "buscar_transacoes" -> Optional.of(ToolConsulta.TRANSACOES);
+            case "compras_parceladas" -> Optional.of(ToolConsulta.COMPRAS_PARCELADAS);
+            case "valor_fatura_mes" -> Optional.of(ToolConsulta.VALOR_FATURA_MES);
+            case "categoria_que_mais_gastou" -> Optional.of(ToolConsulta.CATEGORIA_MAIS_GASTOU);
+            case "capacidades_do_assistente" -> Optional.of(ToolConsulta.CAPACIDADES);
             default -> Optional.empty();
         };
     }

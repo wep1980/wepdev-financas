@@ -24,7 +24,8 @@ import java.util.regex.Pattern;
  * Itaú usam "DD/MM", Nubank usa "DD MES" (mês abreviado em português, ex:
  * "10 JUN") — parsearData tenta os formatos conhecidos em sequência.
  */
-public record LancamentoExtraidoDto(String descricao, String valor, String dataTexto, String tipo, String categoriaSugerida) {
+public record LancamentoExtraidoDto(String descricao, String valor, String dataTexto, String tipo,
+                                     String categoriaSugerida, Integer numeroParcela, Integer quantidadeParcelas) {
 
     private static final DateTimeFormatter DD_MM_YYYY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final Pattern DIA_MES_ABREVIADO = Pattern.compile("(\\d{1,2})\\s+([A-Za-zÀ-ÿ]{3})\\.?");
@@ -33,17 +34,42 @@ public record LancamentoExtraidoDto(String descricao, String valor, String dataT
             Map.entry("MAI", 5), Map.entry("JUN", 6), Map.entry("JUL", 7), Map.entry("AGO", 8),
             Map.entry("SET", 9), Map.entry("OUT", 10), Map.entry("NOV", 11), Map.entry("DEZ", 12)
     );
+    /** "Parcela 8/11", "Parcela 08 / 11" — formato usado por Nubank/Itaú/Santander, testado na prática. */
+    private static final Pattern PADRAO_PARCELA = Pattern.compile("Parcela\\s+(\\d+)\\s*/\\s*(\\d+)", Pattern.CASE_INSENSITIVE);
 
     /** @throws RuntimeException (várias subclasses) se algum campo vier em formato inesperado — quem chama decide se descarta esse item (best-effort, ver AgenteExtracaoFaturaService). */
     public LancamentoPendente paraDominio(UUID documentoId, String anoReferencia) {
+        int[] parcela = resolverParcela();
         return LancamentoPendente.extrair(
                 documentoId,
                 descricao.trim(),
                 normalizarValor(valor),
                 parsearData(dataTexto, anoReferencia),
                 TipoLancamento.valueOf(tipo.trim().toUpperCase()),
-                (categoriaSugerida == null || categoriaSugerida.isBlank()) ? null : categoriaSugerida.trim()
+                (categoriaSugerida == null || categoriaSugerida.isBlank()) ? null : categoriaSugerida.trim(),
+                parcela[0],
+                parcela[1]
         );
+    }
+
+    /**
+     * Prioriza os campos estruturados pedidos ao LLM (mais confiável — o
+     * modelo já enxerga o texto inteiro e o contexto); se vierem nulos
+     * (LLM às vezes omite mesmo quando pedido, ver Javadoc de
+     * AgenteExtracaoFaturaService sobre confiabilidade), cai pro
+     * reconhecimento determinístico de "Parcela X/Y" na descrição como
+     * rede de segurança (2026-08-11, ver ADR-0028). Sem nenhum dos dois,
+     * assume à vista (1/1).
+     */
+    private int[] resolverParcela() {
+        if (numeroParcela != null && quantidadeParcelas != null) {
+            return new int[]{numeroParcela, quantidadeParcelas};
+        }
+        Matcher parcela = PADRAO_PARCELA.matcher(descricao);
+        if (parcela.find()) {
+            return new int[]{Integer.parseInt(parcela.group(1)), Integer.parseInt(parcela.group(2))};
+        }
+        return new int[]{1, 1};
     }
 
     private static LocalDate parsearData(String dataTexto, String anoReferencia) {

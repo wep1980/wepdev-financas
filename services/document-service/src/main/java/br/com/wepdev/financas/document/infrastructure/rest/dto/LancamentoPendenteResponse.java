@@ -16,6 +16,8 @@ public record LancamentoPendenteResponse(
         LocalDate data,
         TipoLancamento tipo,
         String categoriaSugerida,
+        int numeroParcela,
+        int quantidadeParcelas,
         StatusLancamento status
 ) {
     public static LancamentoPendenteResponse de(LancamentoPendente lancamento) {
@@ -27,6 +29,8 @@ public record LancamentoPendenteResponse(
                 lancamento.getData(),
                 lancamento.getTipo(),
                 lancamento.getCategoriaSugerida(),
+                lancamento.getNumeroParcela(),
+                lancamento.getQuantidadeParcelas(),
                 lancamento.getStatus()
         );
     }

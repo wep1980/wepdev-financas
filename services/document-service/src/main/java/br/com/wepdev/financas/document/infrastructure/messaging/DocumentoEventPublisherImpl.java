@@ -9,6 +9,16 @@ import org.eclipse.microprofile.reactive.messaging.Emitter;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Sem chamador hoje (ADR-0028, 2026-08-11) — FATURA_CARTAO (único tipo
+ * implementado) passou a confirmar lançando compras no card-service, não
+ * publicando evento. Mantido pronto pra EXTRATO_BANCARIO/BOLETO_FINANCIAMENTO
+ * (ADR-0023/0028), que devem continuar usando esse caminho — cada tipo
+ * de documento decide sua própria forma de agregação quando for
+ * implementado, aqui fica só o transporte (1 lançamento confirmado = 1
+ * item no evento, mesma forma consumida por
+ * {@code DocumentoLancamentosConfirmadosConsumer} no transaction-service).
+ */
 @ApplicationScoped
 public class DocumentoEventPublisherImpl implements DocumentoEventPublisher {
 

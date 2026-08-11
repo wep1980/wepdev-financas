@@ -7,6 +7,7 @@ import java.util.UUID;
 public record UploadDocumentoCommand(
         UUID usuarioId,
         TipoDocumento tipo,
+        UUID cartaoId,
         String nomeArquivo,
         byte[] conteudoArquivo,
         String senha,
