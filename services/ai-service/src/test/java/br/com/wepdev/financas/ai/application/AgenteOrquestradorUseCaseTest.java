@@ -6,6 +6,7 @@ import br.com.wepdev.financas.ai.domain.CardServiceClient;
 import br.com.wepdev.financas.ai.domain.Cartao;
 import br.com.wepdev.financas.ai.domain.ChatRequest;
 import br.com.wepdev.financas.ai.domain.ChatResponse;
+import br.com.wepdev.financas.ai.domain.CompraResumo;
 import br.com.wepdev.financas.ai.domain.ConfiguracaoIa;
 import br.com.wepdev.financas.ai.domain.ConfiguracaoIaRepository;
 import br.com.wepdev.financas.ai.domain.Conta;
@@ -16,6 +17,7 @@ import br.com.wepdev.financas.ai.domain.DisponivelParaGastar;
 import br.com.wepdev.financas.ai.domain.Fatura;
 import br.com.wepdev.financas.ai.domain.LlmProvider;
 import br.com.wepdev.financas.ai.domain.LlmProviderFactory;
+import br.com.wepdev.financas.ai.domain.Parcela;
 import br.com.wepdev.financas.ai.domain.ResultadoBusca;
 import br.com.wepdev.financas.ai.domain.ResumoCategoria;
 import br.com.wepdev.financas.ai.domain.StatusFatura;
@@ -142,6 +144,91 @@ class AgenteOrquestradorUseCaseTest {
         ChatResultado resultado = useCase.executar(new ChatComando(usuarioId, null, "quando vence minha fatura?"));
 
         assertThat(resultado.resposta()).containsIgnoringCase("não tem cartão");
+    }
+
+    @Test
+    void deveriaResponderComprasParceladas_agregandoTodosOsCartoes() {
+        mockConversaNova();
+        when(llmProvider.chat(any())).thenReturn(new ChatResponse(
+                "{\"intent\": \"CONSULTA\", \"tool\": \"compras_parceladas\", \"periodo\": null}"));
+        UUID cartaoId = UUID.randomUUID();
+        when(cardServiceClient.buscarCartoesAtivos()).thenReturn(List.of(new Cartao(cartaoId, "Nubank")));
+        when(cardServiceClient.listarCompras(cartaoId)).thenReturn(List.of(
+                new CompraResumo(UUID.randomUUID(), "Notebook", "Eletrônicos", new BigDecimal("100.00"), 12, 9,
+                        new BigDecimal("900.00"), false),
+                new CompraResumo(UUID.randomUUID(), "Celular", "Eletrônicos", new BigDecimal("250.00"), 6, 2,
+                        new BigDecimal("500.00"), false),
+                // à vista (quantidadeParcelas=1) não entra na resposta
+                new CompraResumo(UUID.randomUUID(), "Mercado", "Alimentação", new BigDecimal("80.00"), 1, 0,
+                        BigDecimal.ZERO, true),
+                // já finalizada não entra na resposta
+                new CompraResumo(UUID.randomUUID(), "Fone antigo", "Eletrônicos", new BigDecimal("50.00"), 3, 0,
+                        BigDecimal.ZERO, true)));
+
+        ChatResultado resultado = useCase.executar(new ChatComando(usuarioId, null, "quantas compras parceladas eu tenho?"));
+
+        assertThat(resultado.resposta())
+                .contains("2 compra(s) parcelada(s)")
+                .contains("Notebook").contains("faltam 9 de 12 parcelas")
+                .contains("Celular").contains("faltam 2 de 6 parcelas")
+                .contains("maior parcela é de R$250.00")
+                .doesNotContain("Mercado").doesNotContain("Fone antigo");
+    }
+
+    @Test
+    void deveriaResponderValorFaturaMes_separandoParceladoDeAVista() {
+        mockConversaNova();
+        when(llmProvider.chat(any())).thenReturn(new ChatResponse(
+                "{\"intent\": \"CONSULTA\", \"tool\": \"valor_fatura_mes\", \"periodo\": \"MES_ATUAL\"}"));
+        UUID cartaoId = UUID.randomUUID();
+        UUID faturaId = UUID.randomUUID();
+        when(cardServiceClient.buscarCartoesAtivos()).thenReturn(List.of(new Cartao(cartaoId, "Nubank")));
+        when(cardServiceClient.buscarFaturas(cartaoId, null)).thenReturn(List.of(
+                new Fatura(faturaId, YearMonth.now(), LocalDate.now().plusDays(10), new BigDecimal("380.00"), StatusFatura.ABERTA)));
+        when(cardServiceClient.buscarParcelasDaFatura(faturaId)).thenReturn(List.of(
+                new Parcela(UUID.randomUUID(), "Notebook", "Eletrônicos", 3, 12, new BigDecimal("100.00")),
+                new Parcela(UUID.randomUUID(), "Celular", "Eletrônicos", 1, 6, new BigDecimal("200.00")),
+                new Parcela(UUID.randomUUID(), "Mercado", "Alimentação", 1, 1, new BigDecimal("80.00"))));
+
+        ChatResultado resultado = useCase.executar(new ChatComando(usuarioId, null, "qual o valor da fatura desse mês?"));
+
+        assertThat(resultado.resposta())
+                .contains("380.00")
+                .contains("300.00") // parcelado: 100 + 200
+                .contains("80.00"); // à vista: 80
+    }
+
+    @Test
+    void deveriaResponderCategoriaMaisGastou_combinandoTransacoesECartao() {
+        mockConversaNova();
+        when(llmProvider.chat(any())).thenReturn(new ChatResponse(
+                "{\"intent\": \"CONSULTA\", \"tool\": \"categoria_que_mais_gastou\", \"periodo\": \"MES_ATUAL\"}"));
+        when(transactionServiceClient.buscarResumoPorCategoria(any(), any())).thenReturn(List.of(
+                new ResumoCategoria("Alimentação", new BigDecimal("100.00"), new BigDecimal("30.00"), null)));
+        UUID cartaoId = UUID.randomUUID();
+        UUID faturaId = UUID.randomUUID();
+        when(cardServiceClient.buscarCartoesAtivos()).thenReturn(List.of(new Cartao(cartaoId, "Nubank")));
+        when(cardServiceClient.buscarFaturas(cartaoId, null)).thenReturn(List.of(
+                new Fatura(faturaId, YearMonth.now(), LocalDate.now().plusDays(10), new BigDecimal("500.00"), StatusFatura.ABERTA)));
+        when(cardServiceClient.buscarParcelasDaFatura(faturaId)).thenReturn(List.of(
+                new Parcela(UUID.randomUUID(), "Notebook", "Eletrônicos", 1, 3, new BigDecimal("500.00"))));
+
+        ChatResultado resultado = useCase.executar(new ChatComando(usuarioId, null, "qual categoria eu mais gastei esse mês?"));
+
+        // Eletrônicos (500, só cartão) > Alimentação (100, só transação)
+        assertThat(resultado.resposta()).contains("Eletrônicos").contains("500.00");
+    }
+
+    @Test
+    void deveriaResponderCapacidades_semChamadaExterna() {
+        mockConversaNova();
+        when(llmProvider.chat(any())).thenReturn(new ChatResponse(
+                "{\"intent\": \"CONSULTA\", \"tool\": \"capacidades_do_assistente\", \"periodo\": null}"));
+
+        ChatResultado resultado = useCase.executar(new ChatComando(usuarioId, null, "no que você pode me ajudar?"));
+
+        assertThat(resultado.resposta()).containsIgnoringCase("saldo disponível").containsIgnoringCase("fatura de cartão");
+        assertThat(resultado.trace()).isEmpty();
     }
 
     @Test

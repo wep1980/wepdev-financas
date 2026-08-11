@@ -46,3 +46,9 @@ mudar.
 | [0019](0019-ingress-cloudflare-tunnel.md) | Ingress via Cloudflare Tunnel | Aceita |
 | [0020](0020-deploy-runner-self-hosted.md) | Deploy via runner self-hosted do GitHub Actions | Aceita — refinada por ADR-0021 |
 | [0021](0021-deploy-kamal.md) | Deploy dos serviços de aplicação via Kamal (zero-downtime, rollback) | Aceita |
+| [0022](0022-card-service-independente-de-conta.md) | `card-service` independente de `TipoConta.CARTAO_CREDITO` | Aceita |
+| [0023](0023-document-service-primeira-fatia-escopo.md) | `document-service` — escopo da primeira fatia (fatura PDF) | Aceita |
+| [0024](0024-upload-documento-assincrono.md) | Upload de documento assíncrono | Aceita |
+| [0025](0025-confirmacao-posse-conta-antes-do-evento.md) | Confirmação de posse de conta antes do evento Kafka | Aceita |
+| [0026](0026-regra-calculo-disponivel-para-gastar.md) | Regra de cálculo de "disponível pra gastar" no `budget-service` | Aceita |
+| [0027](0027-autenticacao-frontend-authjs-keycloak.md) | Autenticação do front-end web via Auth.js (NextAuth v5) + provider Keycloak | Aceita |

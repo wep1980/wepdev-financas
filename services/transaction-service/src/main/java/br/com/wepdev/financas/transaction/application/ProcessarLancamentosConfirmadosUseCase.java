@@ -11,8 +11,12 @@ import jakarta.transaction.Transactional;
 /**
  * Consumido pelo {@code DocumentoLancamentosConfirmadosConsumer} (Kafka,
  * tópico "documento.lancamentos-confirmados") — cria uma {@link Transacao}
- * avulsa comum por lançamento confirmado (ADR-0023, sem integração com
- * card-service). Usa {@code debitarSemConfirmarPosse}/
+ * avulsa comum por item da lista recebida (ADR-0023, sem integração com
+ * card-service). Loop preparado pra N itens, mas na prática o
+ * document-service publica sempre 1 (a despesa consolidada da fatura
+ * inteira, 2026-08-11 — ver {@code DocumentoImportado.getDespesaConsolidada}
+ * no document-service): fatura nunca vira uma transação por lançamento.
+ * Usa {@code debitarSemConfirmarPosse}/
  * {@code creditarSemConfirmarPosse} (ADR-0025): posse de {@code contaId} já
  * foi confirmada no document-service, síncrono, antes do evento ser
  * publicado — este consumer não tem token de usuário pra reverificar.

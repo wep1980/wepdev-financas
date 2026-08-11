@@ -339,6 +339,51 @@ class CartaoResourceTest {
 
     @Test
     @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_COMPRA))
+    void deveriaListarCompras_agrupadasPorCompraId_comParcelasRestantes() {
+        String cartaoId = criarCartaoEObterId("Nubank compras");
+        given()
+                .contentType(ContentType.JSON)
+                .body(new LancarCompraRequest("Notebook", new BigDecimal("300.00"), "Eletrônicos",
+                        LocalDate.of(2026, 8, 1), 3))
+        .when()
+                .post("/api/v1/cartoes/{id}/compras", cartaoId)
+        .then()
+                .statusCode(201);
+        given()
+                .contentType(ContentType.JSON)
+                .body(new LancarCompraRequest("Mercado", new BigDecimal("50.00"), "Alimentação",
+                        LocalDate.of(2026, 8, 1), 1))
+        .when()
+                .post("/api/v1/cartoes/{id}/compras", cartaoId)
+        .then()
+                .statusCode(201);
+
+        given()
+        .when()
+                .get("/api/v1/cartoes/{id}/compras", cartaoId)
+        .then()
+                .statusCode(200)
+                .body("size()", equalTo(2))
+                .body("find { it.descricao == 'Notebook' }.quantidadeParcelas", equalTo(3))
+                .body("find { it.descricao == 'Notebook' }.parcelasRestantes", equalTo(3))
+                .body("find { it.descricao == 'Notebook' }.finalizada", equalTo(false))
+                .body("find { it.descricao == 'Mercado' }.parcelasRestantes", equalTo(1));
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
+    @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
+    void deveriaRetornar404_quandoListarComprasDeCartaoInexistente() {
+        given()
+        .when()
+                .get("/api/v1/cartoes/{id}/compras", UUID.randomUUID())
+        .then()
+                .statusCode(404);
+    }
+
+    @Test
+    @TestSecurity(user = "usuario-teste", roles = "usuario")
     @JwtSecurity(claims = @Claim(key = "sub", value = SUB_USUARIO_TESTE))
     void deveriaRetornar404_quandoListarFaturasDeCartaoInexistente() {
         given()

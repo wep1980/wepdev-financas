@@ -21,7 +21,8 @@ class ListarDocumentosUseCaseTest {
     @Test
     void deveriaDelegarParaORepositorio_comOFiltroDeStatus() {
         UUID usuarioId = UUID.randomUUID();
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, "a.pdf", "x".getBytes());
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO,
+                UUID.randomUUID(), "a.pdf", "x".getBytes());
         when(repository.listarPorUsuario(usuarioId, StatusDocumento.AGUARDANDO_CONFIRMACAO)).thenReturn(List.of(documento));
 
         List<DocumentoImportado> resultado = useCase.executar(usuarioId, StatusDocumento.AGUARDANDO_CONFIRMACAO);

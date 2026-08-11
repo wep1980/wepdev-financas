@@ -76,12 +76,22 @@ próprio usuário, se ele quiser plugar direto):
 |---|---|---|
 | `buscar_saldo_disponivel` | Retorna valor exato disponível pra gastar no mês | `budget-service` + `account-service` |
 | `buscar_transacoes` | Busca transações por período/categoria/texto (híbrido: filtro relacional + busca semântica) | `transaction-service` + Qdrant |
-| `buscar_fatura_cartao` | Retorna dados de fatura (total, vencimento, lançamentos) | `card-service` |
+| `buscar_fatura_cartao` | Retorna dados da fatura fechada mais recente (total, vencimento) | `card-service` |
 | `resumo_gastos_por_categoria` | Agrega gastos por categoria num período, com comparação a período anterior | `transaction-service` (`GET /transacoes/resumo-por-categoria` — mesmo endpoint usado pelo dashboard web, PRD 3.7, um cálculo só) |
+| `compras_parceladas` | Compras parceladas ativas — quantas, maior parcela, quanto falta de cada uma | `card-service` (`GET /cartoes/{id}/compras`, agrupado por `compraId`) |
+| `valor_fatura_mes` | Valor da fatura de um mês específico, separado em parcelado vs à vista | `card-service` (fatura da competência + parcelas dela) |
+| `categoria_que_mais_gastou` | Categoria com mais gasto num período — soma transações **e** compras de cartão (cartão não gera `Transacao`, ver ADR-0028 do `document-service`) | `transaction-service` + `card-service` |
+| `capacidades_do_assistente` | "No que você pode me ajudar" — resposta fixa, sem chamada externa | — |
 | `criar_transacao` | **(escrita)** Cria receita/despesa, pontual ou recorrente (`TransacaoRecorrente` se houver frequência/duração — ver ADR-0009) | `transaction-service` |
 
 `criar_transacao` é a única tool de escrita do v1 (PRD 3.5). Todas as outras
 são somente leitura. Essa distinção importa pro design do agente — ver 4.2.
+
+As quatro últimas tools de consulta (2026-08-11, pedido do usuário — ver
+`docs/historico.md`) nasceram junto com o religamento do `document-service`
+ao `card-service` (ADR-0028): antes disso não fazia sentido perguntar sobre
+parcelamento porque fatura de cartão importada virava despesa avulsa, sem
+nenhum conceito de parcela guardado em lugar nenhum.
 
 Agentes especializados (v1, mínimo necessário — não criar agente por criar):
 

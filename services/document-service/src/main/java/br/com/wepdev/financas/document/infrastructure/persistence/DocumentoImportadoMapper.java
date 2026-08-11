@@ -23,6 +23,7 @@ final class DocumentoImportadoMapper {
     static void atualizarEntidade(DocumentoImportadoEntity entity, DocumentoImportado documento) {
         entity.usuarioId = documento.getUsuarioId();
         entity.tipo = documento.getTipo().name();
+        entity.cartaoId = documento.getCartaoId();
         entity.nomeArquivo = documento.getNomeArquivo();
         entity.status = documento.getStatus().name();
         entity.mensagemErro = documento.getMensagemErro();
@@ -36,6 +37,7 @@ final class DocumentoImportadoMapper {
                 entity.id,
                 entity.usuarioId,
                 TipoDocumento.valueOf(entity.tipo),
+                entity.cartaoId,
                 entity.nomeArquivo,
                 entity.conteudoArquivo,
                 StatusDocumento.valueOf(entity.status),

@@ -15,10 +15,10 @@ public class UploadDocumentoForm {
     @PartType(MediaType.TEXT_PLAIN)
     public String tipo;
 
-    /** Nulo = fatura de uma pessoa só (sem filtro de seção) — ver AgenteExtracaoFaturaService. */
-    @RestForm("nomeFiltro")
+    /** Cartão (card-service) que essa fatura pertence — obrigatório (ADR-0028). */
+    @RestForm("cartaoId")
     @PartType(MediaType.TEXT_PLAIN)
-    public String nomeFiltro;
+    public String cartaoId;
 
     /** Nulo = PDF sem proteção. Nunca logada. */
     @RestForm("senha")

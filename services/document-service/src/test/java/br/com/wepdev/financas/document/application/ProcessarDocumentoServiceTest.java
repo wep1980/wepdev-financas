@@ -29,14 +29,15 @@ class ProcessarDocumentoServiceTest {
     private final ProcessarDocumentoService service = new ProcessarDocumentoService(repository, agente);
 
     private final UUID usuarioId = UUID.randomUUID();
+    private final UUID cartaoId = UUID.randomUUID();
     private final byte[] conteudo = "pdf-fake".getBytes();
 
     @Test
     void deveriaConcluirComLancamentos_quandoAgenteExtraiAlgo() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, "fatura.pdf", conteudo);
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId, "fatura.pdf", conteudo);
         when(repository.buscarPorId(documento.getId(), usuarioId)).thenReturn(Optional.of(documento));
         LancamentoPendente lancamento = LancamentoPendente.extrair(documento.getId(), "Mercado",
-                new BigDecimal("100.00"), LocalDate.of(2026, 8, 5), TipoLancamento.DESPESA, null);
+                new BigDecimal("100.00"), LocalDate.of(2026, 8, 5), TipoLancamento.DESPESA, null, 1, 1);
         when(agente.extrair(documento.getId(), conteudo, null, null)).thenReturn(List.of(lancamento));
 
         service.processar(documento.getId(), usuarioId, conteudo, null, null);
@@ -47,7 +48,7 @@ class ProcessarDocumentoServiceTest {
 
     @Test
     void deveriaMarcarErro_quandoAgenteNaoExtraiNada() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, "fatura.pdf", conteudo);
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId, "fatura.pdf", conteudo);
         when(repository.buscarPorId(documento.getId(), usuarioId)).thenReturn(Optional.of(documento));
         when(agente.extrair(any(), any(), any(), any())).thenReturn(List.of());
 
@@ -59,7 +60,7 @@ class ProcessarDocumentoServiceTest {
 
     @Test
     void deveriaMarcarErro_quandoPdfIlegivel() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, "fatura.pdf", conteudo);
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId, "fatura.pdf", conteudo);
         when(repository.buscarPorId(documento.getId(), usuarioId)).thenReturn(Optional.of(documento));
         when(agente.extrair(any(), any(), any(), any())).thenThrow(new PdfIlegivelException());
 
@@ -71,7 +72,7 @@ class ProcessarDocumentoServiceTest {
 
     @Test
     void deveriaMarcarErroGenerico_quandoAgenteLancaExcecaoInesperada() {
-        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, "fatura.pdf", conteudo);
+        DocumentoImportado documento = DocumentoImportado.receber(usuarioId, TipoDocumento.FATURA_CARTAO, cartaoId, "fatura.pdf", conteudo);
         when(repository.buscarPorId(documento.getId(), usuarioId)).thenReturn(Optional.of(documento));
         when(agente.extrair(any(), any(), any(), any())).thenThrow(new RuntimeException("falha de rede com o Ollama"));
 

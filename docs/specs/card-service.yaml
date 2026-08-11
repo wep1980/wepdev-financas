@@ -164,6 +164,35 @@ paths:
         "404":
           description: Cartão não encontrado (ou pertence a outro usuário)
 
+  /api/v1/cartoes/{id}/compras:
+    get:
+      summary: >
+        Lista as compras do cartão agrupadas por compraId — não existe uma
+        "compra" persistida em separado, é sempre o agrupamento das
+        Parcelas que compartilham o mesmo compraId (ver LancarCompraUseCase
+        e Parcela). Cobre à vista (quantidadeParcelas=1) e parcelada.
+        parcelasRestantes/valorTotalRestante contam só parcelas cuja
+        fatura ainda está ABERTA (ainda não cobrada) — usado pra dedup no
+        document-service (2026-08-11, ver historico.md: upload de fatura
+        não lança de novo uma compra já conhecida) e pelas perguntas de IA
+        sobre parcelamento.
+      security: [{ oidc: [usuario] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Lista de compras (ordenada por descrição)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CompraResumoResponse" }
+        "404":
+          description: Cartão não encontrado (ou pertence a outro usuário)
+
   /api/v1/faturas/{id}:
     get:
       summary: Busca uma fatura pelo id, com os lançamentos (parcelas) que a compõem
@@ -309,6 +338,18 @@ components:
         competencia: { type: string, description: 'Formato AAAA-MM' }
         numeroParcela: { type: integer }
         valor: { type: number, format: decimal }
+    CompraResumoResponse:
+      type: object
+      properties:
+        compraId: { type: string, format: uuid }
+        cartaoId: { type: string, format: uuid }
+        descricao: { type: string }
+        categoria: { type: string, nullable: true }
+        valorParcela: { type: number, format: decimal, description: 'Valor de uma parcela (todas iguais, exceto a última, que absorve o arredondamento)' }
+        quantidadeParcelas: { type: integer, description: '1 = compra à vista' }
+        parcelasRestantes: { type: integer, description: 'Parcelas cuja fatura ainda está ABERTA (ainda não cobrada)' }
+        valorTotalRestante: { type: number, format: decimal }
+        finalizada: { type: boolean, description: 'true quando todas as parcelas já estão em fatura FECHADA ou PAGA' }
 
     FaturaResponse:
       type: object

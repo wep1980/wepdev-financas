@@ -62,6 +62,14 @@ Decisões já tomadas (todas confirmadas pelo usuário em 2026-08-09):
   lançamento confirmado vira `Transacao` avulsa comum, seguindo o fluxo já
   desenhado em `docs/architecture/overview.md` seção 3. Biblioteca de
   extração de texto de PDF: **Apache PDFBox**.
+  > **Superado em 2026-08-11 pela ADR-0028** — usuário pediu exatamente o
+  > cruzamento com `card-service` previsto acima como possível adiante
+  > ("levar em consideração só as compras novas" + "parcela reduzindo mês
+  > a mês sem novo upload", já implementado no `card-service` desde a
+  > fatia 2). Upload agora exige `cartaoId`; confirmação lança compra
+  > nova no cartão (dedup por assinatura) em vez de publicar evento
+  > Kafka. Ver `docs/historico.md` 2026-08-11 pro detalhe completo da
+  > implementação e validação.
 - Spec escrita: `docs/specs/document-service.yaml` (upload multipart,
   listar, buscar detalhe, confirmar lançamentos).
 
@@ -840,4 +848,408 @@ Ollama/OpenAI), consulta e ação (criação de transação) por linguagem
 natural, confirmação obrigatória antes de qualquer ação (ADR-0007). 64
 testes, CI verde, container validado contra a stack real (Mongo/Kafka/
 Qdrant conectados, endpoints autenticados testados via token real).
-    fatia, mesmo padrão do item 7 da fatia 4).
+
+## Fatia 6 — Front-end Next.js
+
+Primeira interface visual do sistema (PRD, roadmap #6) — até aqui tudo foi
+validado via Swagger/Postman. Cobre dashboard com gráfico de gastos por
+categoria (PRD 3.7), CRUD completo de conta/transação, upload de
+documento e chat com a IA, todos consumindo os seis serviços já
+entregues. Next.js assume o papel de BFF (ADR-0006) — Route
+Handlers/Server Components agregam os microsserviços, nenhum serviço
+"gateway" novo.
+
+Três decisões em aberto desde o ADR-0006 foram fechadas antes de começar
+(confirmadas pelo usuário, 2026-08-10):
+- **Estilo/componentes**: Tailwind CSS + shadcn/ui (componentes copiados
+  pro repo, não dependência de runtime — zero lock-in, fácil de temizar
+  claro/escuro depois).
+- **Autenticação**: Auth.js (NextAuth v5) com provider OIDC genérico
+  contra o Keycloak, reaproveitando o client `web-app` já existente —
+  ver ADR-0027 (regra completa: sessão JWT em cookie httpOnly, access
+  token nunca exposto ao client-side, refresh automático, logout também
+  encerra a sessão SSO no Keycloak).
+- **Direção visual inicial**: paleta neutra/profissional — base cinza +
+  um azul de destaque — ajustável depois que o usuário ver o produto
+  rodando, não é uma identidade final fechada em pedra.
+
+Testes seguem `docs/architecture/testing-strategy.md` seção 3 (já
+decidido antes desta fatia): Vitest + React Testing Library pra
+componente/hook, MSW pra mockar chamada HTTP na borda (nunca mockar a
+função que faz a chamada).
+
+1. ✅ Scaffold do projeto (`services/web/` — nome de pasta segue o padrão
+   `services/<nome>/` do resto do repo, mesmo não sendo um serviço
+   Quarkus): `create-next-app` (Next.js 16, App Router, Turbopack,
+   TypeScript, Tailwind CSS v4), init do shadcn/ui (`baseColor: neutral`
+   — já bate com a decisão de paleta), tokens de cor claro/escuro
+   editados em `app/globals.css` pra trocar `--primary`/`--ring`/
+   `--sidebar-primary` de cinza puro pra azul de destaque
+   (`oklch(0.546 0.185 259.8)` claro / `oklch(0.65 0.16 259.8)` escuro),
+   resto da paleta mantido neutro. `next.config.ts` com
+   `output: "standalone"`. Tooling de teste (Vitest + React Testing
+   Library + MSW, `testing-strategy.md` seção 3) — smoke test da página
+   inicial passando. `Dockerfile` multi-stage (builder `npm ci` + `npm
+   run build`, runner só copia `.next/standalone` + estáticos, usuário
+   não-root) validado de ponta a ponta: `npm run lint`/`npm run test`/
+   `npm run build` limpos, `docker build` + `docker run` respondendo
+   200 em `GET /`.
+
+   Achado real: `npx shadcn@latest init` adicionou o próprio pacote
+   `shadcn` (CLI) como `dependencies` em vez de `devDependencies` —
+   corrigido na mão (é uma ferramenta de build, nunca importada em
+   runtime). Isso causou um conflito de peer dependency ao instalar
+   `@vitejs/plugin-react` (Babel 7 do `shadcn` vs. peer opcional em
+   Babel 8 de uma dependência do Vite/rolldown) — resolvido com
+   `--legacy-peer-deps` (seguro aqui, conflito é só entre ferramentas de
+   dev, não afeta runtime). `next dev`/`next build` do Next.js 16 têm
+   mudanças reais de convenção em relação a versões anteriores (ex:
+   `proxy.ts` substitui `middleware.ts`) — guias completos ficam em
+   `node_modules/next/dist/docs/`, consultados antes de decidir a
+   estrutura (relevante principalmente pro item 2, autenticação).
+2. ✅ Autenticação (ADR-0027): Auth.js (NextAuth v5 beta) com o provider
+   Keycloak nativo (`next-auth/providers/keycloak`), client `web-app`
+   reaproveitado como está (público, sem `client_secret`) —
+   `client: { token_endpoint_auth_method: "none" }` no provider evita o
+   Auth.js tentar enviar Basic Auth com secret `undefined`; PKCE + state
+   já são o default do Auth.js pra qualquer provider OIDC, então o fluxo
+   continua seguro sem secret. `proxy.ts` (não `middleware.ts` — Next.js
+   16 renomeou, ver item 1) com `callbacks.authorized` protegendo toda
+   rota exceto `/login` e `/api/auth/*`, redirecionando pra `/login`
+   automaticamente. Sessão JWT (cookie httpOnly) — `callbacks.jwt`
+   guarda `accessToken`/`refreshToken`/`idToken`/`expiresAt`, renova
+   sozinho quando expira (`lib/auth-token-refresh.ts`, funções puras
+   testadas: `precisaRenovar`/`renovarToken`, 7 testes). `callbacks.session`
+   NUNCA expõe token nenhum — só `user.id`/`name`/`email` — porque esse
+   objeto é literalmente o que `/api/auth/session` devolve pra qualquer
+   fetch do navegador (mesmo em Server Component); Route Handler que
+   precisar do access token usa `lib/auth-token.ts`
+   (`getToken()`, lê o cookie httpOnly direto, nunca passa pelo endpoint
+   público). Logout (`lib/auth-actions.ts`) faz RP-Initiated Logout de
+   verdade: limpa a sessão local E redireciona pro
+   `end_session_endpoint` do Keycloak com `id_token_hint`, encerrando a
+   sessão SSO — não só um "logout de mentirinha" que deixa o Keycloak
+   ainda logado.
+
+   **Achado crítico, pego lendo o código-fonte do `@auth/core` antes de
+   confiar cegamente**: sem adapter de banco configurado (é o nosso
+   caso, sessão é só JWT), o Auth.js gera um `user.id` **aleatório**
+   (`crypto.randomUUID()`) a cada login — não usa o `sub` do id_token
+   por padrão. Se eu não tivesse sobrescrito isso, `session.user.id`
+   nunca bateria com o `usuarioId` usado em todo o resto do sistema
+   (ADR-0003), quebrando silenciosamente qualquer chamada aos
+   microsserviços feita em nome do usuário. Corrigido no `callbacks.jwt`:
+   `token.sub = profile.sub` (o `profile` cru do id_token, disponível só
+   no login inicial). **Validado de ponta a ponta contra o Keycloak
+   real** (login completo via `curl` simulando o browser — GET da tela
+   de login, POST de usuário/senha, follow do callback OAuth): a sessão
+   final trouxe `user.id = "cd4cf57c-b5a8-4b2c-b9b5-ffba5770e19d"`,
+   exatamente o mesmo `sub` que o `usuario.teste` já usava em todo teste
+   anterior deste projeto (account-service, ai-service, etc.) — confirma
+   que o fix realmente resolve o problema, não só na teoria.
+
+   `.env.example` novo (`AUTH_SECRET`, `AUTH_TRUST_HOST`, `AUTH_URL`,
+   `AUTH_KEYCLOAK_ID`, `AUTH_KEYCLOAK_ISSUER`) — `AUTH_SECRET` de dev
+   gerado com `openssl rand -base64 33`, registrado no inventário de
+   credenciais (`security.md`). `app/login/page.tsx` (form com Server
+   Action `entrar()`, chama `signIn("keycloak")`) e `app/page.tsx`
+   atualizado (mostra usuário logado + botão sair — placeholder até o
+   item 3 construir o shell de verdade). `types/next-auth.d.ts` faz
+   module augmentation do `Session`/`JWT` pros campos customizados.
+3. ✅ Layout base (shell): route group `app/(app)/` (não muda URL, só
+   agrupa layout — `/login` fica fora, sem cabeçalho/nav) com
+   `layout.tsx` novo: cabeçalho (nome do sistema, navegação principal,
+   usuário logado + botão sair). Página inicial (antigo `app/page.tsx`)
+   movida pra `app/(app)/page.tsx` e virou o placeholder do "Dashboard"
+   (item 6) — texto de "logado como"/botão sair saíram de lá porque o
+   cabeçalho já cobre isso. `lib/nav-items.ts` centraliza os itens de
+   menu com uma flag `implementado`: item ainda não construído (Contas,
+   Transações, Documentos, Chat IA — itens 4/5/7/8) aparece no menu como
+   texto "em breve", não como link — evita 404 clicando em algo que
+   ainda não existe. Layout confirma sessão de novo
+   (`if (!sessao?.user) redirect("/login")`) mesmo já protegido pelo
+   `proxy.ts`, defensivo pro caso de renovação de token falhar
+   (`sessao.error`), com aviso visível no cabeçalho nesse caso. `npm run
+   lint`/`test`/`build` limpos, hot reload do Turbopack confirmou sem
+   precisar reiniciar o dev server.
+4. ✅ CRUD de conta (`account-service`): listar/criar/editar/excluir —
+   primeira tela de dado real. Padrão que os itens seguintes (5, 7, 8)
+   reaproveitam: `lib/account-service.ts` (client HTTP server-only,
+   `obterAccessToken()` do item 2 propaga `Authorization: Bearer`,
+   `cache: "no-store"` — dado por usuário nunca pode vazar entre
+   requests/usuários diferentes), Server Component (`app/(app)/contas/page.tsx`)
+   busca a lista direto (sem Route Handler intermediário — decisão
+   tomada na hora, ver nota abaixo), Server Actions
+   (`app/(app)/contas/actions.ts`: `criarContaAction`/`atualizarContaAction`/
+   `excluirContaAction`, com `revalidatePath("/contas")` depois de cada
+   mutação) + client component com `useActionState` pro formulário
+   (`conta-form-dialog.tsx`, dialog reutilizado pra criar E editar).
+
+   **Desvio consciente do que o item previa**: a doc oficial do Next.js
+   (lida antes de escrever código, `node_modules/next/dist/docs/.../mutating-data.md`)
+   deixa claro que Server Actions são o caminho recomendado pra mutação
+   no App Router — Route Handler vira proxy só quando o cliente
+   realmente precisa de um endpoint HTTP de verdade (ex: chamado de
+   fora do React, como webhook). Como toda mutação aqui parte de um
+   `<form>` da própria UI, Server Action é mais simples (sem
+   fetch/serialização manual no client, `useActionState` já dá
+   pending/erro de graça) e é o padrão que os itens 5/7/8 vão seguir —
+   por isso description original do item ("Route Handler") não reflete
+   o que foi construído.
+
+   `lib/nav-items.ts`: "Contas" virou `implementado: true`.
+
+   Validado contra a stack real (não só mock): GET `/contas` autenticado
+   (mesmo fluxo de login simulado via `curl` do item 2) trouxe as 10
+   contas reais que `usuario.teste` já tinha de testes anteriores desta
+   sessão — confirma que `obterAccessToken()`/propagação de token/parse
+   de resposta funcionam de ponta a ponta contra o `account-service` de
+   verdade. Mutação (criar/editar/excluir) validada só via os testes
+   automatizados (`account-service.test.ts`, 5 testes com `fetch`
+   mockado) + `npm run build`/`lint` — não dá pra simular um Server
+   Action via `curl` puro (protocolo Flight do React exige um header
+   `Next-Action` com encoding específico), então o clique de verdade no
+   formulário fica pro usuário conferir no navegador.
+5. ✅ CRUD de transação (`transaction-service`): mesmo padrão do item 4
+   (`lib/transaction-service.ts` server-only, Server Component pra
+   leitura, Server Actions pra mutação). `/transacoes` tem duas seções
+   na mesma página: transações (filtro por conta/período via `<form
+   method="GET">` nativo — sem JS nenhum, `searchParams` é lido direto
+   no Server Component; criar/editar via dialog; cancelar reverte
+   saldo) e regras recorrentes (criar/listar/cancelar — sem editar,
+   API não tem PUT pra regra recorrente). Frequência fixa em `MENSAL`
+   no form (único valor aceito no v1, mesma regra do `transaction-service`).
+
+   Extraído `components/confirm-action-button.tsx` (form com
+   `confirm()` nativo antes de submeter) — segunda vez que esse padrão
+   apareceu (excluir conta no item 4, cancelar transação/regra aqui),
+   hora de eliminar a duplicação; `excluir-conta-button.tsx` do item 4
+   refatorado pra usar o componente novo também.
+
+   Filtro de conta/período optou por `<select>`/`<input type=date>`
+   nativos em vez do `Select` do shadcn/ui — é só uma barra de filtro
+   simples via GET, não precisa de hidratação client-side nenhuma pra
+   funcionar (funciona até sem JavaScript no navegador).
+
+   Validado contra a stack real: GET `/transacoes` autenticado trouxe
+   as 10 transações e 3 regras recorrentes reais que `usuario.teste` já
+   tinha; filtro `?contaId=...` testado também (200, mesmo padrão de
+   login simulado via `curl` dos itens 2/4). 6 testes novos
+   (`transaction-service.test.ts`) cobrindo montagem de query string,
+   erro 401 sem token, e propagação de mensagem/status de erro
+   (incluindo 422 de saldo insuficiente).
+6. ✅ Dashboard (PRD 3.7), `app/(app)/page.tsx` (substitui o
+   placeholder do item 3): `lib/budget-service.ts` novo (mesmo padrão
+   server-only dos itens 4/5), `resumoPorCategoria` adicionado a
+   `lib/transaction-service.ts`. Seletor de mês (`<input type="month">`
+   — casa exatamente com o formato AAAA-MM que budget-service/
+   transaction-service esperam, sem precisar converter nada) num
+   `<form method="GET">` nativo, mesmo espírito do filtro do item 5.
+   `lib/mes.ts` (`mesAtual`/`limitesDoMes`) deriva `inicio`/`fim` do mês
+   selecionado pra alimentar `resumo-por-categoria` (que trabalha com
+   data, não mês) — 4 testes cobrindo mês de 30/31 dias e fevereiro
+   bissexto/não bissexto.
+
+   Gráfico de gastos por categoria: componente oficial `chart` do
+   shadcn/ui (Recharts por baixo) — os tokens `--chart-1`.._-5` já
+   tinham sido definidos no item 1 (scaffold), sem precisar mexer em
+   `globals.css` de novo. Barra dupla por categoria (`totalGasto` vs
+   `totalGastoPeriodoAnterior`, PRD 3.7 pede "comparação com o período
+   anterior" — o `transaction-service` já calcula isso, só precisava
+   plotar). "Disponível pra gastar" mostra o valor + o detalhamento
+   item a item que o `budget-service` devolve (saldo de contas, faturas
+   em aberto, despesas recorrentes, reserva) — mesma filosofia de
+   auditoria/explicação do ADR-0026. Reserva: form pequeno inline
+   (`reserva-form.tsx`), não é lista, é valor único por usuário.
+   Orçamentos: mesmo padrão lista+dialog dos itens 4/5
+   (`orcamento-form-dialog.tsx`, reutiliza `ConfirmActionButton` do
+   item 5 pra cancelar) — editar só manda `valorLimite` (único campo
+   editável na API), categoria/mês ficam fixos depois de criado.
+
+   Validado contra a stack real: GET `/` autenticado trouxe o
+   "disponível pra gastar" real (R$ 32.508,67, 9 contas somadas) e o
+   payload do gráfico com `categoria`/`totalGasto` de verdade — mesmo
+   roteiro de login via `curl` dos itens 2/4/5. 4 testes novos em
+   `budget-service.test.ts` (401 sem token, querystring do mês, 422 de
+   orçamento duplicado, corpo do PUT da reserva) + os 4 de `mes.test.ts`
+   — 27 testes no total do `web` agora.
+
+   **Extensão pedida depois do item 7** (2026-08-10): duas
+   funcionalidades novas no dashboard, fora do escopo original do
+   backlog.
+   - **Reserva sugerida**: regra decidida com o usuário (via pergunta
+     direta — não é ambiguidade pequena, é regra de negócio nova) =
+     média de RECEITA confirmada dos últimos 3 meses (`MESES_MEDIA_RECEITA`
+     em `lib/reserva-sugerida.ts`, função pura `calcularReservaSugerida`,
+     4 testes). `lib/mes.ts` ganhou `limitesUltimosMeses(mesReferencia,
+     quantidade)` pra calcular a janela (3 testes, incluindo virada de
+     ano). `ReservaForm` ganhou um link "usar sugestão" que só preenche
+     o campo (client-side, sem round-trip ao servidor — o valor já veio
+     calculado do Server Component).
+   - **Cotação do dólar**: `lib/cambio.ts`, integração nova com a
+     AwesomeAPI (`economia.awesomeapi.com.br`, pública, sem chave —
+     decidida com o usuário). Primeira chamada HTTP do projeto que NÃO
+     é a um dos seis microsserviços — sem `obterAccessToken()`, sem
+     `cache: "no-store"` (dado público, igual pra todo usuário,
+     cacheado 5min via `next: { revalidate: 300 }`, diferente de todo
+     outro client HTTP do projeto que é por-usuário e nunca pode
+     cachear). Falha da API externa não derruba o dashboard — captura
+     erro e mostra "cotação indisponível", 3 testes cobrindo sucesso,
+     resposta não-ok e falha de rede.
+
+   Validado contra a stack real e a API externa de verdade: GET `/`
+   trouxe a cotação real do dia (~R$ 5,11) via AwesomeAPI e a reserva
+   sugerida bateu exatamente com o cálculo manual (1 receita confirmada
+   de R$ 5.000 na janela → sugestão R$ 1.666,67). 42 testes no total do
+   `web` agora.
+7. ✅ Upload de documento (`document-service`): `lib/document-service.ts`
+   (mesmo padrão server-only, mas com uma diferença real — upload é
+   `multipart/form-data`, não JSON. `Content-Type` **não** é setado na
+   mão: precisa do boundary que o `fetch` calcula sozinho a partir do
+   `FormData`; setar manualmente quebraria o multipart. Único client
+   HTTP dos quatro que tem essa exceção documentada no próprio código).
+
+   Fluxo em três telas: `/documentos` (form de upload + lista, mesmo
+   padrão lista dos itens 4-6) → upload aceito redireciona pra
+   `/documentos/{id}` (a spec do `document-service` já é assíncrona —
+   extração real leva minutos, não segundos, testado na prática desde a
+   fatia 3) → `/documentos/[id]` faz **polling client-side** enquanto
+   status é `RECEBIDO`/`PROCESSANDO` (`setInterval` chamando uma Server
+   Action a cada 4s, não é uma Server Action tradicional ligada a
+   formulário — é chamada direto do `useEffect`, mesmo padrão que a doc
+   oficial do Next.js mostra pra "refresh data" fora de mutação de
+   form) até virar `AGUARDANDO_CONFIRMACAO` (mostra os lançamentos com
+   checkbox — todos marcados por padrão, desmarcar = rejeitar — + select
+   de conta) ou `ERRO_PROCESSAMENTO` (mostra `mensagemErro`).
+
+   `next.config.ts`: `experimental.serverActions.bodySizeLimit` subido
+   de `1mb` (default do Next.js) pra `10mb` — casa com
+   `quarkus.http.limits.max-body-size=10M` que o `document-service` já
+   aceita; sem isso, fatura PDF real (testada com fatura de banco
+   grande na fatia 3) estouraria o limite de Server Action antes de
+   sequer chegar no back-end.
+
+   **Limite de validação, registrado com transparência**: diferente dos
+   itens 4-6 (onde pelo menos o GET foi validado contra a stack real
+   via `curl` simulando login), o upload em si passa por uma Server
+   Action com `<input type="file">` — o protocolo Flight do React pra
+   isso é ainda mais específico que uma Server Action comum (multipart
+   com boundary próprio, action ID de build), não dava pra reproduzir
+   de forma confiável via `curl` no tempo desta sessão. Validado via 5
+   testes automatizados (`document-service.test.ts` — inclusive um
+   teste específico que confirma o `Content-Type` NÃO é setado na mão
+   antes do `fetch`) + `npm run build`/`lint` limpos + GET `/documentos`
+   confirmado contra o `document-service` real (0 documentos do
+   `usuario.teste` até agora). O upload real de PDF (há três faturas de
+   teste em `test-data/` já usadas na fatia 3) fica pro usuário
+   testar clicando na tela — é o item com menos cobertura automatizada
+   da fatia até aqui, vale atenção extra na conferência manual.
+8. ✅ Refinamento visual (design system) — inserido a pedido do
+   usuário, que trouxe um prompt extenso pedindo um "design system
+   completo" (40+ componentes, docs exaustivas) inspirado em
+   Stripe/Vercel/Linear/Notion/Apple e referências de produto (YNAB,
+   Monarch Money, Copilot Money etc.). Antes de codar, análise crítica
+   apresentada ao usuário (não implementei calado): o pedido original
+   contradiz o princípio de fatias verticais do `CLAUDE.md` (construir
+   componente sem uso real, ex: Command Palette/Data Grid/Timeline) e
+   propõe páginas de menu sem serviço de back-end correspondente
+   (Metas, Investimentos dedicado, Relatórios, Importações,
+   Exportações). Usuário concordou com a versão enxuta em 3 decisões
+   (perguntadas via `AskUserQuestion`): doc viva e incremental (não
+   especificação antecipada), trocar fonte Geist→Inter, e fazer esse
+   refinamento como item dedicado antes do chat de IA (por isso o chat
+   virou item 9 e o fechamento item 10).
+
+   Entregue: `docs/architecture/design-system.md` novo (tokens
+   realmente implementados — cor, tipografia, spacing, radius, shell,
+   padrões de página já estabelecidos — e uma seção explícita do que
+   ficou de fora e por quê). Tokens: `--radius` 10px→12px
+   ("nunca cantos retos"), `Card` ganhou `shadow-sm` + borda mais
+   discreta (`ring-foreground/5`, era `/10`). Fonte: Geist→Inter
+   (`app/layout.tsx`) — **achado real**: a variável do Geist se
+   chamava `--font-geist-sans`, mas o `@theme inline` (herdado do init
+   do shadcn/ui) sempre referenciou `--font-sans` — nomes diferentes,
+   então a fonte customizada nunca esteve de fato aplicada em nenhuma
+   tela dos itens 1-7 (fallback silencioso pro padrão do navegador);
+   corrigido nomeando a variável do `Inter()` exatamente `--font-sans`.
+   `--font-mono` (apontava pro Geist Mono, removido) trocado pra cair
+   no monospace default do Tailwind.
+
+   Shell: header horizontal (item 3) trocado por menu lateral fixo
+   (desktop) / off-canvas (mobile) — `app/(app)/app-sidebar.tsx` novo,
+   `app/(app)/layout.tsx` reescrito. Decisão consciente de **não** usar
+   o bloco "sidebar" completo do shadcn/ui (collapse-to-icon, atalho de
+   teclado, cookie de persistência, tooltip por item) — infraestrutura
+   de dashboard enterprise sem uso real pros 5 itens de menu atuais,
+   mesmo raciocínio aplicado à crítica do pedido original. Escrito na
+   mão: `useState` só pro estado mobile, `md:` breakpoint CSS puro pro
+   desktop (sem hook de detecção de mobile — evita flash de layout
+   errado no primeiro paint), item ativo via `usePathname()`.
+
+   Padding de página: `p-6` → `p-6 md:p-8` nas 5 páginas existentes
+   (contas/transações/dashboard/documentos/documentos detalhe) — mais
+   respiro no desktop, mobile inalterado.
+
+   Validado contra a stack real (mesmo roteiro de login via `curl` dos
+   itens anteriores): shell novo confirmado renderizando (aria-labels
+   "Abrir menu"/"Fechar menu" presentes na resposta), fonte Inter
+   confirmada carregando. `npm run lint`/`test`(42)/`build` limpos —
+   mudança é puramente visual/estrutural, sem lógica nova, então sem
+   testes novos.
+9. ✅ Chat com a IA (`ai-service`): `lib/ai-service.ts` (mesmo padrão
+   server-only) + `app/(app)/chat/` — layout com lista de conversas
+   (sidebar, `GET /conversas`) e botão de configuração de provedor;
+   `/chat` (conversa nova) e `/chat/[id]` (conversa existente, `GET
+   /conversas/{id}`) renderizam o mesmo `ChatClient`.
+
+   Diferente dos itens 4-7 (Server Action + `useActionState` presa a
+   `<form>`), o envio de mensagem precisa de uma lista que cresce a
+   cada troca — `ChatClient` é client component com `useState` local
+   pra lista de mensagens, `enviarMensagemAction` chamada direto (não
+   presa a form), mensagem do usuário aparece otimisticamente antes da
+   resposta chegar. Primeira mensagem de uma conversa nova atualiza a
+   URL pra `/chat/{conversaId}` via `router.replace()` (sem reload) —
+   dá pra voltar/atualizar a página sem perder a conversa.
+
+   Proposta de ação (`tipo=PROPOSTA_ACAO`) renderiza um card dentro da
+   bolha de mensagem (descrição, valor, categoria, prazo de expiração)
+   com um botão "Confirmar" — que só **envia a mensagem "sim"**, não é
+   um endpoint separado (a API do `ai-service` não tem um `/confirmar`
+   dedicado de propósito — confirmação é conversacional, ver
+   `ai-strategy.md`). Corrigir é simplesmente digitar outra coisa — sem
+   botão dedicado, reflete a mesma simplificação já documentada na
+   fatia 5 (correção = comando novo do zero, não merge incremental).
+
+   Configuração de IA (`ConfiguracaoIaDialog`): provedor
+   OpenAI (pede API key) ou Ollama (URL opcional). Banner no topo
+   avisa se a IA ainda não foi configurada, sem bloquear a tela (deixa
+   o usuário ver a configuração e mandar mensagem, que vai dar 422 com
+   mensagem clara se tentar sem configurar — mesmo tratamento de erro
+   já usado nos outros clients).
+
+   `buscarConfiguracaoIa` envolvida em `cache()` do React — layout do
+   chat e a página (nova conversa ou existente) chamam a mesma
+   configuração na mesma renderização, dedupe evita duas chamadas HTTP
+   idênticas (mesmo princípio já usado em `lib/auth-token.ts`).
+
+   **Validado de ponta a ponta contra a stack real, incluindo o LLM de
+   verdade** (não só o REST): configurei Ollama como provedor via API
+   direta, mandei uma pergunta real
+   ("quanto tenho disponivel pra gastar esse mes?") pro `ai-service` —
+   primeira tentativa deu timeout (30s, modelo `llama3.1` ainda frio no
+   Ollama), segunda tentativa (modelo já carregado em memória) voltou
+   em 8s com "Você tem R$32508.67 disponível pra gastar em 2026-08" e
+   `trace: [{"nome":"buscar_saldo_disponivel"}]` — o mesmo valor exato
+   já confirmado no dashboard (item 6). Carreguei essa conversa real em
+   `/chat/{id}` no navegador (via `curl` autenticado) e confirmei que o
+   HTML renderizado contém a resposta de verdade — a primeira vez nesta
+   fatia que dá pra validar um fluxo de IA de ponta a ponta pela UI, não
+   só pela API. 5 testes automatizados novos (`ai-service.test.ts`).
+10. 🔲 Fechamento da fatia: CI (job `web` — `npm test`, `npm run build`,
+   build de imagem Docker de validação; sem OWASP Dependency-Check
+   Maven aqui, usar `npm audit` — ver `security.md` seção 6 e princípio
+   7 do `CLAUDE.md`), `docker-compose.yml` (serviço `web`, porta 3000),
+   `.env.example` (variáveis novas do Next.js/Auth.js), `diagrams.md`
+   (container graph com o `web` apontando pros seis serviços),
+   `overview.md`, `roadmap.md` (fatia 6 → ✅ Entregue), `README.md`
+   raiz, `docs/historico.md`.

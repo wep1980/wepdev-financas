@@ -34,7 +34,8 @@ public class UploadDocumentoUseCase {
 
     public DocumentoImportado executar(UploadDocumentoCommand command) {
         DocumentoImportado documento = DocumentoImportado.receber(
-                command.usuarioId(), command.tipo(), command.nomeArquivo(), command.conteudoArquivo());
+                command.usuarioId(), command.tipo(), command.cartaoId(), command.nomeArquivo(),
+                command.conteudoArquivo());
         repository.salvar(documento);
 
         UUID documentoId = documento.getId();

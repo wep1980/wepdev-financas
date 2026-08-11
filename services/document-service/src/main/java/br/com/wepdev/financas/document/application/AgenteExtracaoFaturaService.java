@@ -70,13 +70,16 @@ public class AgenteExtracaoFaturaService {
     /**
      * {@code senha}: nula se o PDF não for protegido (comum em fatura de
      * banco/cartão brasileira usar CPF do titular como senha).
-     * {@code nomeFiltro}: nulo extrai a fatura inteira; preenchido restringe
-     * a extração à seção de um titular/dependente específico — uma fatura
-     * de cartão com cartão adicional lista o uso de cada pessoa em seção
-     * separada (testado na prática, 2026-08-09). Quando o recorte por
-     * cabeçalho de seção não encontra nada (formato de fatura diferente do
-     * testado), cai de volta pro texto inteiro + instrução no prompt pro
-     * LLM tentar filtrar ele mesmo.
+     * {@code nomeFiltro}: nome completo do usuário autenticado (claim "name"
+     * do Keycloak, ver {@code DocumentoResource.nomeUsuarioAutenticado} —
+     * nunca um campo digitado no upload, 2026-08-11), nulo extrai a fatura
+     * inteira; preenchido restringe a extração à seção de um
+     * titular/dependente específico — uma fatura de cartão com cartão
+     * adicional lista o uso de cada pessoa em seção separada (testado na
+     * prática, 2026-08-09). Quando o recorte por cabeçalho de seção não
+     * encontra nada (formato de fatura diferente do testado, ou nome do
+     * Keycloak não bate com o nome impresso na fatura), cai de volta pro
+     * texto inteiro + instrução no prompt pro LLM tentar filtrar ele mesmo.
      *
      * @throws br.com.wepdev.financas.document.domain.PdfIlegivelException se o PDF não tiver texto extraível.
      * @throws br.com.wepdev.financas.document.domain.PdfProtegidoPorSenhaException se o PDF estiver protegido e a senha não foi fornecida ou está incorreta.
@@ -165,7 +168,8 @@ public class AgenteExtracaoFaturaService {
                   "anoReferencia": "AAAA",
                   "lancamentos": [
                     {"descricao": "...", "valor": "123.45", "dataTexto": "DD/MM", \
-                "tipo": "DESPESA", "categoriaSugerida": "..."}
+                "tipo": "DESPESA", "categoriaSugerida": "...", "numeroParcela": 1, \
+                "quantidadeParcelas": 1}
                   ]
                 }
 
@@ -181,6 +185,10 @@ public class AgenteExtracaoFaturaService {
                 - "categoriaSugerida" é uma categoria curta em português (ex: \
                 "Alimentação", "Transporte", "Assinaturas") baseada na \
                 descrição — se não tiver certeza, use null.
+                - "numeroParcela"/"quantidadeParcelas": se a descrição \
+                mencionar parcelamento (ex: "Parcela 3/12", "3 de 12"), \
+                extraia os dois números; senão, os dois valem 1 (compra à \
+                vista). Nunca deixe nulo.
                 - "lancamentos" é sempre uma lista, mesmo que tenha só um item.
                 - Ignore linhas de total, subtotal, juros, IOF, taxa de câmbio \
                 e resumo — só lançamentos individuais.

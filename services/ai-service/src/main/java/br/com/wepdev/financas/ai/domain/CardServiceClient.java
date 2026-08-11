@@ -14,4 +14,10 @@ public interface CardServiceClient {
     List<Cartao> buscarCartoesAtivos();
 
     List<Fatura> buscarFaturas(UUID cartaoId, StatusFatura statusFiltro);
+
+    /** Parcelas de uma fatura específica — usado pra separar parcelado vs à vista (tool valor_fatura_mes, 2026-08-11). */
+    List<Parcela> buscarParcelasDaFatura(UUID faturaId);
+
+    /** Compras agrupadas por compraId, ainda ativas ou não (tool compras_parceladas, 2026-08-11). */
+    List<CompraResumo> listarCompras(UUID cartaoId);
 }

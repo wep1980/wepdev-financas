@@ -29,6 +29,15 @@ paths:
         GET /documentos/{id} até o status virar AGUARDANDO_CONFIRMACAO (deu
         certo, lançamentos disponíveis) ou ERRO_PROCESSAMENTO (deu errado,
         ver mensagemErro). Nada é persistido como transação em nenhum caso.
+        Quando a fatura lista mais de uma pessoa (titular + dependente, cada
+        um com cartão adicional em seção própria), a extração é restrita
+        automaticamente à seção de quem está autenticado — o nome vem do
+        claim "name" do token OIDC (Keycloak), nunca de um campo do form.
+        Cada lançamento confirmado vira uma compra nova no card-service
+        (à vista ou parcelada) associada ao cartaoId informado aqui —
+        compra já conhecida de um upload anterior não é lançada de novo
+        (dedup) e parcela continua sendo cobrada mês a mês pelo
+        card-service independente de novo upload (ADR-0028, 2026-08-11).
       security: [{ oidc: [usuario] }]
       requestBody:
         required: true
@@ -36,7 +45,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [arquivo, tipo]
+              required: [arquivo, tipo, cartaoId]
               properties:
                 arquivo:
                   type: string
@@ -46,15 +55,13 @@ paths:
                   type: string
                   enum: [FATURA_CARTAO]
                   description: Lista fechada em v1 — EXTRATO_BANCARIO e BOLETO_FINANCIAMENTO entram em fatias seguintes (ADR-0004)
-                nomeFiltro:
+                cartaoId:
                   type: string
-                  nullable: true
+                  format: uuid
                   description: >
-                    Nome do titular/dependente cuja seção deve ser extraída,
-                    quando a fatura lista o uso de mais de uma pessoa (ex:
-                    cartão adicional) — testado na prática, 2026-08-09.
-                    Omitido/nulo extrai a fatura inteira como se fosse de
-                    uma pessoa só.
+                    Cartão (card-service) que essa fatura pertence —
+                    obrigatório (ADR-0028). Precisa existir e pertencer ao
+                    usuário autenticado, senão 400 no upload.
                 senha:
                   type: string
                   nullable: true
@@ -110,12 +117,14 @@ paths:
   /api/v1/documentos/{id}/confirmar:
     post:
       summary: >
-        Confirma (todos ou parte) os lançamentos pendentes desse documento —
-        só esses viram transação de verdade. Publica UM evento Kafka
-        "documento.lancamentos-confirmados" com a lista confirmada; o
-        transaction-service consome e cria as transações (débito/crédito
-        síncrono com account-service). Idempotente: confirmar de novo um
-        documento já CONFIRMADO não publica evento de novo (204 direto).
+        Confirma (todos ou parte) os lançamentos pendentes desse documento.
+        Cada um dos confirmados vira uma compra no card-service (cartaoId
+        do documento) — à vista ou parcelada, exceto os já conhecidos de
+        um upload anterior (dedup por descrição-base + valor de parcela +
+        quantidade de parcelas) e os do tipo RECEITA (estorno — o
+        card-service ainda não modela isso, limitação conhecida).
+        Idempotente: confirmar de novo um documento já CONFIRMADO não
+        lança nada de novo (204 direto). ADR-0028 (2026-08-11).
       security: [{ oidc: [usuario] }]
       parameters:
         - name: id
@@ -130,12 +139,12 @@ paths:
               $ref: "#/components/schemas/ConfirmarLancamentosRequest"
       responses:
         "204":
-          description: Lançamentos selecionados confirmados (evento publicado) — ou já estava confirmado (idempotente)
+          description: Lançamentos selecionados confirmados (compras lançadas no card-service) — ou já estava confirmado (idempotente)
         "404":
           description: >
             Documento não encontrado (ou pertence a outro usuário), OU
-            contaId não encontrada/não pertence ao usuário (verificado
-            contra o account-service antes de publicar o evento, ADR-0025)
+            cartaoId do documento não existe mais/não pertence ao usuário
+            (checado pelo card-service ao lançar a compra)
         "422":
           description: >
             Documento ainda não terminou de processar (status diferente de
@@ -149,18 +158,8 @@ components:
   schemas:
     ConfirmarLancamentosRequest:
       type: object
-      required: [contaId, lancamentoIdsConfirmados]
+      required: [lancamentoIdsConfirmados]
       properties:
-        contaId:
-          type: string
-          format: uuid
-          description: >
-            Conta (account-service) que vai debitar/creditar os lançamentos
-            confirmados — o document-service não sabe disso sozinho (ADR-0023,
-            não integra com card-service), então o usuário escolhe no momento
-            da confirmação. Todos os lançamentos confirmados nessa chamada
-            vão pra essa mesma conta; se precisar de contas diferentes, são
-            confirmações separadas.
         lancamentoIdsConfirmados:
           type: array
           items: { type: string, format: uuid }
@@ -177,6 +176,7 @@ components:
         id: { type: string, format: uuid }
         usuarioId: { type: string, format: uuid }
         tipo: { type: string, enum: [FATURA_CARTAO] }
+        cartaoId: { type: string, format: uuid, description: 'Cartão (card-service) que essa fatura pertence' }
         nomeArquivo: { type: string }
         status: { type: string, enum: [RECEBIDO, PROCESSANDO, AGUARDANDO_CONFIRMACAO, CONFIRMADO, ERRO_PROCESSAMENTO] }
         mensagemErro:
@@ -205,6 +205,8 @@ components:
           type: string
           nullable: true
           description: Categorização best-effort (PRD 3.2) — usuário pode corrigir na confirmação (fora do escopo v1 mudar aqui, é fixa no momento da extração)
+        numeroParcela: { type: integer, description: '1 = compra à vista ou primeira parcela' }
+        quantidadeParcelas: { type: integer, description: '1 = compra à vista' }
         status: { type: string, enum: [PENDENTE, CONFIRMADO, REJEITADO] }
 
     ErroResponse:

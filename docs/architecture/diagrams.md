@@ -60,6 +60,7 @@ graph LR
 
     Web --> AccountSvc
     Web --> TxSvc
+    Web --> CardSvc
     Web --> AiSvc
     Web --> DocSvc
     Mobile --> AccountSvc
@@ -68,8 +69,8 @@ graph LR
     Mobile --> DocSvc
 
     TxSvc -->|síncrono| AccountSvc
-    DocSvc -->|síncrono, confirma posse ADR-0025| AccountSvc
-    DocSvc -->|evento| Kafka
+    DocSvc -->|síncrono, lança compra + dedup por assinatura, ADR-0028| CardSvc
+    CardSvc -->|síncrono, só ao pagar fatura| AccountSvc
     Kafka --> TxSvc
     TxSvc -->|evento transacao.eventos| Kafka
     BudgetSvc -->|síncrono, ADR-0026| AccountSvc
@@ -219,9 +220,11 @@ nível, sem repetir o detalhe de método já coberto lá.
 Agregado dividido entre dois bancos (`overview.md`) — metadados +
 conteúdo bruto do PDF no MongoDB (`document_service`), lançamentos
 queryable no MySQL (`document_db`), sem transação distribuída entre os
-dois (ADR-0023, ver `docs/tasks.md` fatia 3 item 2). `contaId` (informado
-só no momento da confirmação, ADR-0025) não é campo persistido do
-agregado — é passagem direta pro evento Kafka.
+dois (ADR-0023, ver `docs/tasks.md` fatia 3 item 2). `cartaoId` (obrigatório
+no upload, ADR-0028) **é** campo persistido do agregado — precisa
+sobreviver até a confirmação, quando cada lançamento vira uma compra
+nesse cartão no `card-service` (nunca mais evento Kafka pra
+`FATURA_CARTAO`, ver `overview.md` seção 3).
 
 ```mermaid
 erDiagram
@@ -231,6 +234,7 @@ erDiagram
         uuid id "MongoDB, _id"
         uuid usuarioId
         string tipo "FATURA_CARTAO (único valor na fatia atual)"
+        uuid cartaoId "card-service — obrigatório, ADR-0028"
         string nomeArquivo
         bytes conteudoArquivo "PDF bruto"
         string status "RECEBIDO|PROCESSANDO|AGUARDANDO_CONFIRMACAO|CONFIRMADO|ERRO_PROCESSAMENTO"
@@ -246,6 +250,8 @@ erDiagram
         date data
         string tipo "RECEITA|DESPESA"
         string categoriaSugerida "nullable, best-effort"
+        int numeroParcela "1 = à vista ou primeira parcela, ADR-0028"
+        int quantidadeParcelas "1 = à vista"
         string status "PENDENTE|CONFIRMADO|REJEITADO"
     }
 ```

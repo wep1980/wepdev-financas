@@ -9,12 +9,14 @@ import br.com.wepdev.financas.card.application.ExcluirCartaoUseCase;
 import br.com.wepdev.financas.card.application.LancarCompraCommand;
 import br.com.wepdev.financas.card.application.LancarCompraUseCase;
 import br.com.wepdev.financas.card.application.ListarCartoesUseCase;
+import br.com.wepdev.financas.card.application.ListarComprasUseCase;
 import br.com.wepdev.financas.card.application.ListarFaturasUseCase;
 import br.com.wepdev.financas.card.domain.Cartao;
 import br.com.wepdev.financas.card.domain.StatusFatura;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.AtualizarCartaoRequest;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.CartaoResponse;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.CompraResponse;
+import br.com.wepdev.financas.card.infrastructure.rest.dto.CompraResumoResponse;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.CriarCartaoRequest;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.FaturaResponse;
 import br.com.wepdev.financas.card.infrastructure.rest.dto.LancarCompraRequest;
@@ -48,12 +50,14 @@ public class CartaoResource {
     private final ExcluirCartaoUseCase excluirCartaoUseCase;
     private final LancarCompraUseCase lancarCompraUseCase;
     private final ListarFaturasUseCase listarFaturasUseCase;
+    private final ListarComprasUseCase listarComprasUseCase;
     private final SecurityIdentity identity;
 
     public CartaoResource(CriarCartaoUseCase criarCartaoUseCase, ListarCartoesUseCase listarCartoesUseCase,
                            BuscarCartaoUseCase buscarCartaoUseCase, AtualizarCartaoUseCase atualizarCartaoUseCase,
                            ExcluirCartaoUseCase excluirCartaoUseCase, LancarCompraUseCase lancarCompraUseCase,
-                           ListarFaturasUseCase listarFaturasUseCase, SecurityIdentity identity) {
+                           ListarFaturasUseCase listarFaturasUseCase, ListarComprasUseCase listarComprasUseCase,
+                           SecurityIdentity identity) {
         this.criarCartaoUseCase = criarCartaoUseCase;
         this.listarCartoesUseCase = listarCartoesUseCase;
         this.buscarCartaoUseCase = buscarCartaoUseCase;
@@ -61,6 +65,7 @@ public class CartaoResource {
         this.excluirCartaoUseCase = excluirCartaoUseCase;
         this.lancarCompraUseCase = lancarCompraUseCase;
         this.listarFaturasUseCase = listarFaturasUseCase;
+        this.listarComprasUseCase = listarComprasUseCase;
         this.identity = identity;
     }
 
@@ -143,6 +148,16 @@ public class CartaoResource {
     public List<FaturaResponse> listarFaturas(@PathParam("id") UUID id, @QueryParam("status") StatusFatura status) {
         return listarFaturasUseCase.executar(id, usuarioIdAutenticado(), status).stream()
                 .map(FaturaResponse::de)
+                .toList();
+    }
+
+    @GET
+    @Path("/{id}/compras")
+    @RolesAllowed("usuario")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<CompraResumoResponse> listarCompras(@PathParam("id") UUID id) {
+        return listarComprasUseCase.executar(id, usuarioIdAutenticado()).stream()
+                .map(CompraResumoResponse::de)
                 .toList();
     }
 
