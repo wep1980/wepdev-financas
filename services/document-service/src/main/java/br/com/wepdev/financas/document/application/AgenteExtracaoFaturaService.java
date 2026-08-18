@@ -48,12 +48,12 @@ public class AgenteExtracaoFaturaService {
 
     private static final Logger LOG = Logger.getLogger(AgenteExtracaoFaturaService.class);
 
-    /** Ex: "JOAO P SANTOS -  4000 XXXX XXXX 0002" ou "@ MARIA C SOUZA -  4000 XXXX XXXX 0003". */
+    /** Ex: "JOAO P SANTOS -  4000 XXXX XXXX 0002" ou "@ MARIA C SOUZA -  4000 XXXX XXXX 0001". */
     private static final Pattern CABECALHO_SECAO_CARTAO =
             Pattern.compile("^@?\\s*([\\p{Lu}][\\p{Lu}\\s.]*?)\\s+-\\s+\\d{4}\\s+XXXX\\s+XXXX\\s+\\d{4}\\s*$");
 
     // Bancos escrevem a data de vencimento de jeitos diferentes: "06/08/2026"
-    // (Santander/Itaú) ou "17 JUL 2026" (Nubank, mês abreviado em português).
+    // (Santander/Itaú) ou "20 ABR 2026" (Nubank, mês abreviado em português).
     private static final Pattern LINHA_VENCIMENTO_NUMERICA = Pattern.compile("[Vv]encimento\\D{0,20}\\d{2}/\\d{2}/(\\d{4})");
     private static final Pattern LINHA_VENCIMENTO_MES_ABREVIADO = Pattern.compile("[Vv]encimento\\D{0,20}\\d{1,2}\\s+[A-Za-zÀ-ÿ]{3}\\.?\\s+(\\d{4})");
 

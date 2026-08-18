@@ -61,17 +61,17 @@ class AgenteExtracaoFaturaServiceTest {
 
     @Test
     void deveriaExtrairData_noFormatoDiaMesAbreviado_eDetectarAnoDeVencimentoComMesPorExtenso() {
-        // Nubank escreve data como "10 JUN" e vencimento como "17 JUL 2026" —
+        // Nubank escreve data como "05 MAR" e vencimento como "20 ABR 2026" —
         // formato bem diferente do "DD/MM" do Santander/Itaú, achado real (2026-08-09).
         when(extratorTexto.extrairTexto(any(), any())).thenReturn("""
-                Data de vencimento: 17 JUL 2026
-                10 JUN Mercado R$ 50,00
+                Data de vencimento: 20 ABR 2026
+                05 MAR Mercado R$ 50,00
                 """);
         when(llmProvider.chat(any())).thenReturn(new ChatResponse("""
                 {
                   "anoReferencia": "2026",
                   "lancamentos": [
-                    {"descricao": "Mercado", "valor": "50.00", "dataTexto": "10 JUN", "tipo": "DESPESA", "categoriaSugerida": null}
+                    {"descricao": "Mercado", "valor": "50.00", "dataTexto": "05 MAR", "tipo": "DESPESA", "categoriaSugerida": null}
                   ]
                 }
                 """));
@@ -79,7 +79,7 @@ class AgenteExtracaoFaturaServiceTest {
         List<LancamentoPendente> lancamentos = agente.extrair(documentoId, "pdf-fake".getBytes(), null, null);
 
         assertThat(lancamentos).hasSize(1);
-        assertThat(lancamentos.get(0).getData()).isEqualTo(LocalDate.of(2026, 6, 10));
+        assertThat(lancamentos.get(0).getData()).isEqualTo(LocalDate.of(2026, 3, 5));
     }
 
     @Test

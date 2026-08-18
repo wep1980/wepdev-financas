@@ -244,8 +244,8 @@ Backlog de implementação (mirror do nível de detalhe da fatia 2):
 
    Validado também com a fatura Nubank (PDF fechado): 11 lançamentos, soma
    batendo com o subtotal do cartão na fatura. Achado real no caminho: o
-   Nubank escreve data como "10 JUN" (dia + mês abreviado em português) e
-   vencimento como "17 JUL 2026" — formato bem diferente do "DD/MM" do
+   Nubank escreve data como "05 MAR" (dia + mês abreviado em português) e
+   vencimento como "20 ABR 2026" — formato bem diferente do "DD/MM" do
    Santander/Itaú. `LancamentoExtraidoDto.parsearData` e
    `AgenteExtracaoFaturaService.detectarAnoReferencia` ganharam um segundo
    formato de parsing (mapeamento manual JAN–DEZ, não locale-based —
