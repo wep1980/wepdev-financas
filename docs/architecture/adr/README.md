@@ -53,3 +53,4 @@ mudar.
 | [0026](0026-regra-calculo-disponivel-para-gastar.md) | Regra de cálculo de "disponível pra gastar" no `budget-service` | Aceita |
 | [0027](0027-autenticacao-frontend-authjs-keycloak.md) | Autenticação do front-end web via Auth.js (NextAuth v5) + provider Keycloak | Aceita |
 | [0030](0030-deploy-kubernetes-argocd.md) | Deploy em Kubernetes com Argo CD e imagens no GHCR | Aceita |
+| [0031](0031-persistencia-recursos-segredos-k3s.md) | Persistência, recursos, backup e segredos no K3s | Aceita |

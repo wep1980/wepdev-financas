@@ -40,5 +40,5 @@ mostrar; mobile depois do web validado.
 ## Próxima ação concreta
 
 Fatia 9 (deploy em produção) em andamento. As sete imagens já são publicadas
-no GHCR depois dos gates verdes. Próximo passo: definir persistência, segredos
-e recursos e criar os manifests Kubernetes da aplicação completa.
+no GHCR e persistência, recursos, backup e segredos estão definidos na
+ADR-0031. Próximo passo: criar e validar os manifests Kubernetes.

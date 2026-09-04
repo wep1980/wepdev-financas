@@ -15,9 +15,10 @@ log (nenhum nível, nem DEBUG), documento versionado (`docs/`, ADR, PRD),
 - **Dev local**: variável de ambiente via `.env` (gitignored) — ver
   `.env.example` na raiz, que documenta as variáveis com valores de
   placeholder óbvios (`admin`, `financas`), nunca segredo real.
-- **Produção**: HashiCorp Vault (já na stack, `README.md`) injeta as
-  variáveis de ambiente no `docker-compose.prod.yml`/overlay (ADR-0016) — os
-  defaults de dev (`admin`, `root`, etc.) **nunca** são usados em produção.
+- **Produção**: HashiCorp Vault é a fonte de verdade e o External Secrets
+  Operator materializa os Secrets estritamente necessários no K3s
+  (ADR-0031). Os defaults de dev (`admin`, `root`, etc.) **nunca** são usados
+  em produção.
 - **`.gitignore`** (raiz) bloqueia `.env`, `*.pem`, `*.key`, `secrets/` — se
   precisar de um novo tipo de arquivo sensível, adicionar o padrão lá antes
   de criar o primeiro arquivo desse tipo.

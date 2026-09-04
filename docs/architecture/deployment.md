@@ -98,11 +98,12 @@ e nenhuma porta nova precisa ser aberta no firewall.
 
 ## 4. Bancos de dados e serviços de apoio
 
-Podem rodar em Docker (evoluindo o `docker-compose.yml` já existente) ou
-instalados nativamente no servidor — não é uma regra fixa pro projeto
-inteiro, é uma decisão por serviço quando fizer sentido (ex: performance,
-familiaridade operacional, algo que já esteja instalado por outro motivo).
-Ver ADR-0016 pro critério.
+Para este sistema, MySQL, MongoDB, Kafka KRaft e Qdrant rodam no K3s em
+StatefulSets de uma réplica com volumes locais de retenção. Keycloak persiste
+em banco MySQL; Ollama continua no host com GPU. Vault + External Secrets
+Operator fazem a injeção de credenciais e backups cifrados seguem pela
+Tailscale para a VPS Oracle. Recursos, tamanhos e procedimento de recuperação
+estão definidos na ADR-0031.
 
 ## 5. Topologia
 

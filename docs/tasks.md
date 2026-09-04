@@ -17,8 +17,8 @@
 - [x] Confirmar a publicação das sete imagens no GHCR após todos os gates verdes (run 33910637963).
 - [ ] Criar credencial de escopo mínimo para abertura de PR no `servidor-gitops`.
 - [ ] Criar manifests Kubernetes dos sete serviços sem segredos versionados.
-- [ ] Definir persistência, backup e recursos para MySQL, MongoDB, Redis, Kafka, Qdrant e Keycloak.
-- [ ] Definir injeção de segredos de produção e `imagePullSecret` do GHCR.
+- [x] Definir persistência, backup e recursos para MySQL, MongoDB, Kafka, Qdrant e Keycloak (ADR-0031; Redis adiado por não ter consumidor efetivo).
+- [x] Definir Vault + External Secrets Operator e `imagePullSecret` de leitura do GHCR (ADR-0031).
 - [ ] Validar deploy completo, healthchecks e rollback antes de publicar o hostname definitivo.
 
 ## Fatia 1 — Contas + Transações (back-end) — ✅ Concluída (2026-08-07/08)

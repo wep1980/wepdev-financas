@@ -4206,3 +4206,17 @@ troca do scanner eliminou a dependência operacional da API key da NVD sem
 retirar o gate de vulnerabilidades. O GitHub registrou apenas avisos não
 bloqueantes sobre cache concorrente do Trivy e compatibilidade futura de
 Node.js em `actions/upload-artifact@v4`.
+
+## 2026-09-04 — Arquitetura de estado, recursos, segredos e backup do K3s
+
+A ADR-0031 fechou os bloqueios arquiteturais anteriores ao primeiro deploy
+completo. O dimensionamento usa a capacidade medida do servidor (12 threads,
+46 GiB de RAM e armazenamento dedicado do Kubernetes), com requests iniciais
+conservadores e limites que preservam os projetos já existentes. MySQL,
+MongoDB, Kafka KRaft e Qdrant usam StatefulSets de uma réplica e volumes com
+retenção; Redis ficou fora porque ainda não possui consumidor efetivo.
+
+Vault + External Secrets Operator foram definidos como padrão de segredos.
+Backups lógicos, snapshots de Qdrant e Vault serão cifrados e enviados pela
+Tailscale à VPS Oracle, com restauração obrigatória antes da publicação. Nenhum
+segredo ou `.env` foi lido ou alterado durante esta definição.
