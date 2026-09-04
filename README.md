@@ -167,10 +167,9 @@ Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/w
 `npm test` no `web`, todos no runner hospedado, cobertura publicada como
 artefato do run (JaCoCo nos serviços Java), a imagem Docker de cada um é
 validada a cada mudança e, depois dos gates, publicada no GHCR. O scan de
-vulnerabilidade usa OWASP Dependency-Check
-(ADR-0017) nos serviços Java, `npm audit` no `web` (sem ferramenta Java
-lá, ver `security.md` seção 6). O Dependency-Check usa o acesso público à
-NVD e cache compartilhado, sem API key do projeto (ver
+vulnerabilidade usa Trivy nas imagens dos serviços Java e `npm audit` no
+`web` (ADR-0017, ver `security.md` seção 6). O Trivy bloqueia achados
+HIGH/CRITICAL sem exigir API key da NVD no projeto (ver
 [`docs/architecture/security.md`](docs/architecture/security.md)). Ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 

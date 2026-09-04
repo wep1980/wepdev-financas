@@ -40,7 +40,7 @@ deve resultar numa linha nova aqui.
 | Credencial do provedor de e-mail transacional | ADR-0013 (proposta) | Vault |
 | Credencial de acesso SSH ao servidor de produção (pessoal, do usuário) | ADR-0016 / `deployment.md` | Fora do sistema — gerenciada pelo usuário, nunca toca o repositório |
 | Token de registro do runner self-hosted do GitHub Actions | ADR-0020, superada por ADR-0030 | Não utilizado; runner self-hosted não será instalado para este projeto |
-| Base pública da NVD usada pelo OWASP Dependency-Check | ADR-0017, `.github/workflows/ci.yml` | Acesso sem credencial, apoiado pelo cache do GitHub Actions. Pode ser mais lento ou sofrer limitação pública, mas não exige secret no projeto |
+| Base de vulnerabilidades do Trivy | ADR-0017, `.github/workflows/ci.yml` | Consumida automaticamente pela action oficial, sem API key da NVD ou secret próprio do projeto |
 | Publicação no `ghcr.io` | ADR-0018/0030 | `GITHUB_TOKEN` temporário do próprio job, com `packages: write`; nenhuma credencial persistente no repositório |
 | Credencial para propor atualização no `servidor-gitops` | ADR-0030 | Pendente: GitHub App ou token de escopo mínimo, armazenado somente no GitHub Actions Secrets; nunca versionado |
 | Token do túnel Cloudflare (Cloudflare Zero Trust) | ADR-0019 | Já gerenciado pelo usuário fora do repositório (mesmo mecanismo do portfólio) — nunca commitado |
@@ -84,7 +84,7 @@ ADR-0017 pro detalhe completo. Resumo:
 - **Dependabot** monitora Maven, npm e imagens Docker, abre PR de
   atualização sozinho.
 - **CI falha** em vulnerabilidade HIGH/CRITICAL sem exceção documentada:
-  OWASP Dependency-Check (Java), `npm audit --audit-level=high` (Node),
+  Trivy nas imagens dos serviços Java, `npm audit --audit-level=high` (Node),
   Trivy (imagem Docker).
 - Vulnerabilidade sem correção disponível → exceção documentada (motivo +
   data de revisão), nunca suprimida em silêncio.

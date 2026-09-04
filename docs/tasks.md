@@ -13,7 +13,7 @@
 - [x] Configurar publicação seletiva das sete imagens no GHCR em pushes na `main`.
 - [x] Corrigir a ausência de `services/web/public` no build da imagem Next.js.
 - [x] Atualizar `jackson-databind` para 2.22.2 nos seis serviços após o alerta CVE-2026-54515.
-- [x] Remover a dependência da API key da NVD e manter o scan com acesso público + cache.
+- [x] Remover a dependência da API key da NVD e substituir o scan Java por Trivy nas imagens.
 - [ ] Confirmar a publicação das sete imagens no GHCR após todos os gates verdes.
 - [ ] Criar credencial de escopo mínimo para abertura de PR no `servidor-gitops`.
 - [ ] Criar manifests Kubernetes dos sete serviços sem segredos versionados.

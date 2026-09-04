@@ -4179,7 +4179,22 @@ O alerta CVE-2026-41115 de `kafka-clients` 4.2.1 não recebeu supressão: a
 Apache informa que a implementação está correta, que a correção foi
 documental e orienta revisar as ACLs. O gate continua inalterado em CVSS 7.
 
-A execução remota encontrou uma API key da NVD inválida. Por decisão do
-usuário, o workflow deixou de depender dessa credencial: o Dependency-Check
-continua ativo usando o acesso público e o cache do GitHub Actions. O gate de
-CVSS permanece inalterado.
+A execução remota encontrou uma API key da NVD inválida. Uma tentativa de
+executar sem a credencial também falhou: o Dependency-Check 13 enviou uma
+chave vazia e encerrou a atualização com `NvdApiException`. O cache não
+substitui a carga inicial da base. Para remover essa dependência operacional,
+o workflow passou a analisar as imagens locais dos seis serviços com o Trivy
+antes da publicação. O scan bloqueia vulnerabilidades corrigíveis de
+severidade alta ou crítica e usa o cache de bases mantido pela própria action,
+sem exigir `secrets.NVD_API_KEY`.
+
+Validação local: os seis POMs resolveram `jackson-databind` 2.22.2 e os seis
+serviços foram empacotados com sucesso usando Java 21. A imagem Docker do
+frontend também foi construída com sucesso. Nas suítes Java, 288 testes
+passaram, 126 foram ignorados e seis testes de recurso não iniciaram por uma
+falha de loopback do ambiente Windows (`Unable to establish loopback
+connection`), sem falha de asserção. No runner Linux, todas as suítes e builds
+passaram; a imagem `web` foi publicada no GHCR e as seis imagens Java foram
+corretamente bloqueadas pelo scan anterior, que não conseguiu atualizar a base
+da NVD. A configuração substituta com Trivy foi validada estruturalmente e
+ficou pendente de execução no GitHub Actions após publicação pelo usuário.

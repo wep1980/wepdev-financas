@@ -111,16 +111,15 @@ jobs:
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t account-service:ci .
-      # A base é compartilhada pelo cache para reduzir downloads e respeitar
-      # os limites públicos da NVD, sem depender de credencial do projeto.
-      - name: Cache da base de dados do OWASP Dependency-Check
-        uses: actions/cache@v6
+      - name: Scan de vulnerabilidade da imagem (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: dependency-check-data-${{ github.run_id }}
-          restore-keys: dependency-check-data-
-      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B
+          image-ref: account-service:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -167,14 +166,15 @@ jobs:
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t card-service:ci .
-      - name: Cache da base de dados do OWASP Dependency-Check
-        uses: actions/cache@v6
+      - name: Scan de vulnerabilidade da imagem (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: dependency-check-data-${{ github.run_id }}
-          restore-keys: dependency-check-data-
-      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B
+          image-ref: card-service:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -221,14 +221,15 @@ jobs:
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t document-service:ci .
-      - name: Cache da base de dados do OWASP Dependency-Check
-        uses: actions/cache@v6
+      - name: Scan de vulnerabilidade da imagem (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: dependency-check-data-${{ github.run_id }}
-          restore-keys: dependency-check-data-
-      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B
+          image-ref: document-service:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -275,14 +276,15 @@ jobs:
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t transaction-service:ci .
-      - name: Cache da base de dados do OWASP Dependency-Check
-        uses: actions/cache@v6
+      - name: Scan de vulnerabilidade da imagem (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: dependency-check-data-${{ github.run_id }}
-          restore-keys: dependency-check-data-
-      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B
+          image-ref: transaction-service:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -329,14 +331,15 @@ jobs:
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t ai-service:ci .
-      - name: Cache da base de dados do OWASP Dependency-Check
-        uses: actions/cache@v6
+      - name: Scan de vulnerabilidade da imagem (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: dependency-check-data-${{ github.run_id }}
-          restore-keys: dependency-check-data-
-      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B
+          image-ref: ai-service:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -425,14 +428,15 @@ jobs:
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t budget-service:ci .
-      - name: Cache da base de dados do OWASP Dependency-Check
-        uses: actions/cache@v6
+      - name: Scan de vulnerabilidade da imagem (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: dependency-check-data-${{ github.run_id }}
-          restore-keys: dependency-check-data-
-      - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B
+          image-ref: budget-service:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem

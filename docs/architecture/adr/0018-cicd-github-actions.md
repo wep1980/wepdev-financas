@@ -21,8 +21,8 @@ Dois momentos de pipeline, ambos em GitHub Actions:
 1. Build do(s) serviço(s)/app(s) que mudaram (path filters — um PR que só
    mexe no `transaction-service` não builda o resto, ver seção "Consequências").
 2. Testes (`docs/architecture/testing-strategy.md`) — unitário + integração.
-3. Scan de vulnerabilidade (ADR-0017) — OWASP Dependency-Check (Java), `npm
-   audit` (Node), Trivy (imagem Docker, só quando a imagem muda).
+3. Scan de vulnerabilidade (ADR-0017) — Trivy nas imagens dos serviços Java
+   e `npm audit` no frontend Node.
 
 PR não é mergeável se qualquer etapa falhar — sem exceção manual fora do
 processo já definido em ADR-0017.

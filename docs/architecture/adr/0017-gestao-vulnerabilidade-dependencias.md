@@ -23,11 +23,11 @@ Kafka, Keycloak, etc. no `docker-compose.yml`).
    automaticamente. Zero serviço externo, nativo do GitHub, sem custo.
 2. **Gate no CI** (GitHub Actions), falha o build se houver vulnerabilidade
    HIGH/CRITICAL sem exceção documentada:
-   - Java: `OWASP Dependency-Check` (plugin Maven) — self-contained, não
-     depende de conta em serviço externo.
+   - Java: `Trivy` sobre a imagem Docker construída no próprio job, cobrindo
+     bibliotecas Java e pacotes do sistema operacional sem API key da NVD.
    - Node (web/mobile): `npm audit --audit-level=high`.
-   - Imagens Docker: `Trivy` (scan de imagem, incluindo SO da imagem base,
-     não só a aplicação).
+   - Imagens Docker: o mesmo `Trivy` inclui o SO da imagem base, não só a
+     aplicação.
 3. **Processo de exceção**: vulnerabilidade sem correção disponível ainda
    (ou falso positivo) não trava o CI pra sempre — precisa de justificativa
    documentada (arquivo de supressão com motivo + data de revisão), nunca
