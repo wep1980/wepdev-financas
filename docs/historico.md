@@ -4154,3 +4154,14 @@ container `ollama` no servidor (fora de compose). Alterado:
 `README.md`, `docs/architecture/diagrams.md`. No servidor:
 `/etc/modprobe.d`/initramfs (driver NVIDIA), `/etc/docker/daemon.json`
 (runtime NVIDIA).
+## 2026-09-04 — Início da fatia 9 com Kubernetes, Argo CD e GHCR
+
+O servidor de produção passou a operar K3s, Traefik e Argo CD, com o
+repositório privado `wep1980/servidor-gitops`. Por decisão explícita do
+usuário, `wepdev-financas` será o primeiro projeto no novo padrão de CI/CD.
+
+Criada a ADR-0030, que supera ADR-0020/0021: CI permanece nos runners do
+GitHub, imagens imutáveis são publicadas no GHCR e o deploy passa a ser
+declarativo pelo GitOps/Argo CD. O CI existente foi preservado e estendido
+para publicar somente serviços alterados, sempre depois de testes e scans.
+Nenhum segredo ou acesso ao cluster foi adicionado ao repositório.

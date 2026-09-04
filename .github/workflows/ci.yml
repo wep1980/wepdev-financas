@@ -1,7 +1,7 @@
 name: CI
 
-# CD (build de imagem + deploy) fica pra fatia 9 (ADR-0020/0021) — este
-# workflow só cobre build + teste + scan de vulnerabilidade (ADR-0017/0018).
+# CI roda em PR e push; publicação no GHCR ocorre somente em push na `main`
+# depois dos testes e scans (ADR-0017/0018/0030). O Argo CD faz o deploy.
 
 on:
   pull_request:
@@ -37,18 +37,32 @@ jobs:
           filters: |
             account-service:
               - 'services/account-service/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/publicar-imagem/**'
             transaction-service:
               - 'services/transaction-service/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/publicar-imagem/**'
             card-service:
               - 'services/card-service/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/publicar-imagem/**'
             document-service:
               - 'services/document-service/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/publicar-imagem/**'
             budget-service:
               - 'services/budget-service/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/publicar-imagem/**'
             ai-service:
               - 'services/ai-service/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/publicar-imagem/**'
             web:
               - 'services/web/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/publicar-imagem/**'
 
   account-service:
     needs: changes
@@ -60,6 +74,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      packages: write
     defaults:
       run:
         working-directory: services/account-service
@@ -90,10 +105,9 @@ jobs:
           paths: services/account-service/target/site/jacoco/jacoco.xml
           token: ${{ secrets.GITHUB_TOKEN }}
           title: Cobertura de teste — account-service
-      # Só valida que a imagem continua buildando — publicar em registry e
-      # fazer deploy fica pra fatia 9 (ADR-0020/0021, ver comentário no
-      # topo do arquivo). -DskipTests porque os testes já rodaram acima.
-      - name: Build da imagem Docker (validação, não publica)
+      # A publicação só acontece em push na main e depois do scan abaixo.
+      # -DskipTests porque os testes já rodaram acima.
+      - name: Build da imagem Docker
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t account-service:ci .
@@ -108,6 +122,13 @@ jobs:
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
         run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+      - name: Publicar imagem no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/publicar-imagem
+        with:
+          imagem-local: account-service:ci
+          imagem-ghcr: ghcr.io/wep1980/wepdev-financas-account-service
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   card-service:
     needs: changes
@@ -116,6 +137,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      packages: write
     defaults:
       run:
         working-directory: services/card-service
@@ -142,7 +164,7 @@ jobs:
           paths: services/card-service/target/site/jacoco/jacoco.xml
           token: ${{ secrets.GITHUB_TOKEN }}
           title: Cobertura de teste — card-service
-      - name: Build da imagem Docker (validação, não publica)
+      - name: Build da imagem Docker
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t card-service:ci .
@@ -154,6 +176,13 @@ jobs:
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
         run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+      - name: Publicar imagem no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/publicar-imagem
+        with:
+          imagem-local: card-service:ci
+          imagem-ghcr: ghcr.io/wep1980/wepdev-financas-card-service
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   document-service:
     needs: changes
@@ -162,6 +191,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      packages: write
     defaults:
       run:
         working-directory: services/document-service
@@ -188,7 +218,7 @@ jobs:
           paths: services/document-service/target/site/jacoco/jacoco.xml
           token: ${{ secrets.GITHUB_TOKEN }}
           title: Cobertura de teste — document-service
-      - name: Build da imagem Docker (validação, não publica)
+      - name: Build da imagem Docker
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t document-service:ci .
@@ -200,6 +230,13 @@ jobs:
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
         run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+      - name: Publicar imagem no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/publicar-imagem
+        with:
+          imagem-local: document-service:ci
+          imagem-ghcr: ghcr.io/wep1980/wepdev-financas-document-service
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   transaction-service:
     needs: changes
@@ -208,6 +245,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      packages: write
     defaults:
       run:
         working-directory: services/transaction-service
@@ -234,7 +272,7 @@ jobs:
           paths: services/transaction-service/target/site/jacoco/jacoco.xml
           token: ${{ secrets.GITHUB_TOKEN }}
           title: Cobertura de teste — transaction-service
-      - name: Build da imagem Docker (validação, não publica)
+      - name: Build da imagem Docker
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t transaction-service:ci .
@@ -246,6 +284,13 @@ jobs:
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
         run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+      - name: Publicar imagem no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/publicar-imagem
+        with:
+          imagem-local: transaction-service:ci
+          imagem-ghcr: ghcr.io/wep1980/wepdev-financas-transaction-service
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   ai-service:
     needs: changes
@@ -254,6 +299,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      packages: write
     defaults:
       run:
         working-directory: services/ai-service
@@ -280,7 +326,7 @@ jobs:
           paths: services/ai-service/target/site/jacoco/jacoco.xml
           token: ${{ secrets.GITHUB_TOKEN }}
           title: Cobertura de teste — ai-service
-      - name: Build da imagem Docker (validação, não publica)
+      - name: Build da imagem Docker
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t ai-service:ci .
@@ -292,6 +338,13 @@ jobs:
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
         run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+      - name: Publicar imagem no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/publicar-imagem
+        with:
+          imagem-local: ai-service:ci
+          imagem-ghcr: ghcr.io/wep1980/wepdev-financas-ai-service
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   # Único job Node.js do CI — os outros seis são Maven/Java. Sem OWASP
   # Dependency-Check aqui (é uma ferramenta de dependência Java): gate de
@@ -301,6 +354,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     defaults:
       run:
         working-directory: services/web
@@ -321,11 +377,16 @@ jobs:
         run: npm audit --omit=dev
       - name: Build de produção
         run: npm run build
-      # Só valida que a imagem continua buildando — publicar em registry e
-      # fazer deploy fica pra fatia 9 (ADR-0020/0021, mesmo critério dos
-      # jobs Maven acima).
-      - name: Build da imagem Docker (validação, não publica)
+      # Em push na main, a imagem só é publicada depois dos gates acima.
+      - name: Build da imagem Docker
         run: docker build -f Dockerfile -t web:ci .
+      - name: Publicar imagem no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/publicar-imagem
+        with:
+          imagem-local: web:ci
+          imagem-ghcr: ghcr.io/wep1980/wepdev-financas-web
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   budget-service:
     needs: changes
@@ -334,6 +395,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      packages: write
     defaults:
       run:
         working-directory: services/budget-service
@@ -360,7 +422,7 @@ jobs:
           paths: services/budget-service/target/site/jacoco/jacoco.xml
           token: ${{ secrets.GITHUB_TOKEN }}
           title: Cobertura de teste — budget-service
-      - name: Build da imagem Docker (validação, não publica)
+      - name: Build da imagem Docker
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t budget-service:ci .
@@ -372,3 +434,10 @@ jobs:
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
         run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+      - name: Publicar imagem no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/publicar-imagem
+        with:
+          imagem-local: budget-service:ci
+          imagem-ghcr: ghcr.io/wep1980/wepdev-financas-budget-service
+          github-token: ${{ secrets.GITHUB_TOKEN }}

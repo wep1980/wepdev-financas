@@ -6,6 +6,17 @@
 > bloco novo pra próxima fatia) e não deixe esse arquivo virar um histórico
 > gigante — histórico de decisão fica em ADR/git/`docs/historico.md`, não aqui.
 
+## Fatia 9 — Deploy em produção — 🔶 Em andamento (2026-09-04)
+
+- [x] Registrar a substituição de runner self-hosted/Kamal por K3s + Argo CD (ADR-0030).
+- [x] Preservar os testes e scans existentes por serviço.
+- [x] Configurar publicação seletiva das sete imagens no GHCR em pushes na `main`.
+- [ ] Criar credencial de escopo mínimo para abertura de PR no `servidor-gitops`.
+- [ ] Criar manifests Kubernetes dos sete serviços sem segredos versionados.
+- [ ] Definir persistência, backup e recursos para MySQL, MongoDB, Redis, Kafka, Qdrant e Keycloak.
+- [ ] Definir injeção de segredos de produção e `imagePullSecret` do GHCR.
+- [ ] Validar deploy completo, healthchecks e rollback antes de publicar o hostname definitivo.
+
 ## Fatia 1 — Contas + Transações (back-end) — ✅ Concluída (2026-08-07/08)
 
 `account-service`: CRUD completo (criar/listar/buscar/atualizar/excluir) +

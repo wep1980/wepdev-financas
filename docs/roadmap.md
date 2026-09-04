@@ -19,7 +19,7 @@ mostrar; mobile depois do web validado.
 | 6 | Front-end Next.js (React) | Dashboard com gráfico de gastos por categoria (PRD 3.7), CRUD completo de conta/transação/cartão, upload de documento, chat com a IA. UX/estilo/autenticação decididos no início da fatia (Tailwind+shadcn/ui, Auth.js/Keycloak — ADR-0027, paleta neutra) | ✅ Entregue (2026-08-11) |
 | 7 | App React Native | Mesmas funcionalidades do web, mobile-first | 🔲 Planejado |
 | 8 | `notification-service` | Alertas de vencimento (despesa recorrente, fatura de cartão) via push/WhatsApp/e-mail — spec já pronta em `docs/specs/notification-service.yaml` | 🔲 Planejado |
-| 9 | Deploy em produção | Docker Compose pros dados/infra + Kamal pros serviços de aplicação (zero-downtime, rollback automático — ADR-0021) no servidor Linux único (ADR-0016), ingress via Cloudflare Tunnel (ADR-0019), runner self-hosted do GitHub Actions cuidando do deploy (ADR-0018/0020). Kubernetes/Helm/Terraform/ArgoCD/Istio/Vault viram evolução condicional, não o próximo passo padrão | 🔲 Planejado |
+| 9 | Deploy em produção | Imagens imutáveis no GHCR, manifests no `servidor-gitops` e sincronização pelo Argo CD no K3s; entrada via Cloudflare Tunnel + Traefik (ADR-0030). Dados, mensageria, identidade, armazenamento, backup e segredos precisam ser definidos antes do primeiro deploy completo | 🔶 Em andamento |
 
 ## Por que essa ordem (mudanças em relação ao README original)
 

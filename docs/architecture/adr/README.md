@@ -44,11 +44,12 @@ mudar.
 | [0017](0017-gestao-vulnerabilidade-dependencias.md) | Gestão de vulnerabilidade de dependências (Dependabot + gate no CI) | Aceita |
 | [0018](0018-cicd-github-actions.md) | CI/CD via GitHub Actions (build, teste, scan, deploy por SSH) | Aceita — deploy substituído por ADR-0020 |
 | [0019](0019-ingress-cloudflare-tunnel.md) | Ingress via Cloudflare Tunnel | Aceita |
-| [0020](0020-deploy-runner-self-hosted.md) | Deploy via runner self-hosted do GitHub Actions | Aceita — refinada por ADR-0021 |
-| [0021](0021-deploy-kamal.md) | Deploy dos serviços de aplicação via Kamal (zero-downtime, rollback) | Aceita |
+| [0020](0020-deploy-runner-self-hosted.md) | Deploy via runner self-hosted do GitHub Actions | Superada por ADR-0030 |
+| [0021](0021-deploy-kamal.md) | Deploy dos serviços de aplicação via Kamal (zero-downtime, rollback) | Superada por ADR-0030 |
 | [0022](0022-card-service-independente-de-conta.md) | `card-service` independente de `TipoConta.CARTAO_CREDITO` | Aceita |
 | [0023](0023-document-service-primeira-fatia-escopo.md) | `document-service` — escopo da primeira fatia (fatura PDF) | Aceita |
 | [0024](0024-upload-documento-assincrono.md) | Upload de documento assíncrono | Aceita |
 | [0025](0025-confirmacao-posse-conta-antes-do-evento.md) | Confirmação de posse de conta antes do evento Kafka | Aceita |
 | [0026](0026-regra-calculo-disponivel-para-gastar.md) | Regra de cálculo de "disponível pra gastar" no `budget-service` | Aceita |
 | [0027](0027-autenticacao-frontend-authjs-keycloak.md) | Autenticação do front-end web via Auth.js (NextAuth v5) + provider Keycloak | Aceita |
+| [0030](0030-deploy-kubernetes-argocd.md) | Deploy em Kubernetes com Argo CD e imagens no GHCR | Aceita |

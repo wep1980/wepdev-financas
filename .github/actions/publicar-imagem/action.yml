@@ -1,0 +1,35 @@
+name: Publicar imagem no GHCR
+description: Publica a imagem local com tags imutável (SHA) e móvel (main)
+
+inputs:
+  imagem-local:
+    description: Imagem já construída pelo job de CI
+    required: true
+  imagem-ghcr:
+    description: Nome completo da imagem no GHCR, sem tag
+    required: true
+  github-token:
+    description: Token temporário fornecido pelo GitHub Actions
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Autenticar no GHCR
+      shell: bash
+      env:
+        GHCR_TOKEN: ${{ inputs.github-token }}
+      run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+    - name: Publicar tags SHA e main
+      shell: bash
+      env:
+        IMAGEM_LOCAL: ${{ inputs.imagem-local }}
+        IMAGEM_GHCR: ${{ inputs.imagem-ghcr }}
+      run: |
+        set -euo pipefail
+        docker tag "$IMAGEM_LOCAL" "$IMAGEM_GHCR:$GITHUB_SHA"
+        docker tag "$IMAGEM_LOCAL" "$IMAGEM_GHCR:main"
+        docker push "$IMAGEM_GHCR:$GITHUB_SHA"
+        docker push "$IMAGEM_GHCR:main"
+

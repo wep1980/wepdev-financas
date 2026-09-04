@@ -84,10 +84,9 @@ Documentação (`docs/`, ADRs, comentários de PR) em português.
 
 Java 21 + Quarkus · Next.js (React) · React Native · MySQL/Redis/MongoDB · Qdrant
 (vetores, proposto em ADR-0005) · Kafka · Keycloak (OIDC) · Vault · Prometheus/
-Grafana/OTel · Docker Compose (dev e produção) + Kamal pros serviços de
-aplicação (ADR-0021) · GitHub Actions. Produção é servidor Linux único, não
-cluster — Kubernetes/Helm/Terraform/ArgoCD **não** são o padrão (ADR-0016),
-viram evolução condicional se algum dia fizer sentido.
+Grafana/OTel · Docker Compose no desenvolvimento · GitHub Actions + GHCR ·
+K3s/Traefik + Argo CD em produção (ADR-0030). Produção continua em servidor
+Linux único; runner self-hosted e Kamal foram superados pela plataforma GitOps.
 
 ## Estado atual
 

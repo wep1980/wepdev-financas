@@ -1,6 +1,6 @@
 # ADR-0020: Deploy via runner self-hosted do GitHub Actions
 
-Status: Aceita — mecanismo de deploy dos serviços de aplicação refinado por ADR-0021 (Kamal, não `docker compose up -d` direto)
+Status: Superada por ADR-0030
 Data: 2026-08-07
 
 ## Contexto

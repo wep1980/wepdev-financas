@@ -88,13 +88,13 @@ em ADR-0029 e `docs/historico.md`). Mudanças físicas/de sistema:
 - Como qualquer sistema (não só o `wepdev-financas`) usa esse Ollama:
   [`docs/architecture/ollama-servidor-guia.md`](ollama-servidor-guia.md).
 
-## 3. Ingress e deploy — resolvido
+## 3. Ingress e deploy — em implantação
 
-As duas pendências foram fechadas: ingress via **Cloudflare Tunnel**
-(ADR-0019, mesmo mecanismo do portfólio) e deploy via **runner self-hosted
-do GitHub Actions** rodando no próprio servidor (ADR-0020, já que SSH é
-VPN-only). Nenhuma porta nova precisa ser aberta no firewall pra nenhum dos
-dois.
+O ingress continua via **Cloudflare Tunnel**, agora encaminhado ao Traefik
+interno do K3s. O deploy dos serviços de aplicação passou a usar imagens no
+GHCR + repositório GitOps + Argo CD (ADR-0030). Runner self-hosted e Kamal
+foram superados. Nenhuma credencial do cluster é entregue ao GitHub Actions
+e nenhuma porta nova precisa ser aberta no firewall.
 
 ## 4. Bancos de dados e serviços de apoio
 
@@ -111,20 +111,13 @@ Detalhe da decisão de produção em ADR-0016. Diagrama de implantação em
 
 ## 6. Como o deploy chega no servidor
 
-GitHub Actions builda a imagem em runner hospedado do GitHub (CI: build +
-teste + scan de vulnerabilidade, ADR-0017), publica no GitHub Container
-Registry (`ghcr.io`), e o job de deploy roda num **runner self-hosted
-instalado no próprio servidor** (ADR-0020) — que puxa o job do GitHub
-(conexão outbound), sem precisar de SSH nem porta nova aberta.
+GitHub Actions executa build, testes e scans em runners hospedados e publica
+no GHCR somente as imagens dos serviços alterados. Cada imagem recebe uma tag
+imutável com o SHA do commit. O pipeline propõe por pull request a atualização
+dessas tags no repositório `servidor-gitops`; após revisão e merge, o Argo CD
+detecta a mudança e sincroniza o K3s (ADR-0030).
 
-Esse job final aciona o **Kamal** (ADR-0021) pros serviços de aplicação
-(stateless): sobe a imagem nova ao lado da antiga, só corta o tráfego (via
-`kamal-proxy`) depois que a nova passa no healthcheck, mantém a anterior
-pronta pra `kamal rollback` se algo der errado. Serviços de dado/infra
-(MySQL, Mongo, Redis, Kafka, Qdrant, Keycloak) continuam via
-`docker compose pull && up -d` normal (ADR-0016) — não fazem parte do
-esquema de troca com segurança do Kamal.
-
-Público chega no serviço via **Cloudflare Tunnel** (ADR-0019), apontando pro
-`kamal-proxy` (não direto pro container, que troca a cada deploy). Deploy
-só acontece depois que CI passou — nunca pula etapa.
+O GitHub Actions não acessa o servidor nem recebe `kubeconfig`. O Argo CD tem
+acesso somente leitura ao Git. Público chega pelo Cloudflare Tunnel ao Traefik
+e então ao Ingress/Service Kubernetes. Deploy só progride depois dos gates do
+CI e da validação do repositório GitOps.

@@ -1,6 +1,6 @@
 # ADR-0021: Deploy dos serviços de aplicação via Kamal (zero-downtime, rollback automático)
 
-Status: Aceita — refina o mecanismo de deploy de ADR-0020
+Status: Superada por ADR-0030
 Data: 2026-08-07
 
 ## Contexto
