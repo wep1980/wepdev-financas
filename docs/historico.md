@@ -4198,3 +4198,11 @@ passaram; a imagem `web` foi publicada no GHCR e as seis imagens Java foram
 corretamente bloqueadas pelo scan anterior, que não conseguiu atualizar a base
 da NVD. A configuração substituta com Trivy foi validada estruturalmente e
 ficou pendente de execução no GitHub Actions após publicação pelo usuário.
+
+O commit `b8ab68d` executou o pipeline `33910637963` com sucesso. Os seis
+serviços Java passaram pelos testes, build Docker, scan Trivy e publicação no
+GHCR; o frontend passou por lint, testes, `npm audit`, build e publicação. A
+troca do scanner eliminou a dependência operacional da API key da NVD sem
+retirar o gate de vulnerabilidades. O GitHub registrou apenas avisos não
+bloqueantes sobre cache concorrente do Trivy e compatibilidade futura de
+Node.js em `actions/upload-artifact@v4`.

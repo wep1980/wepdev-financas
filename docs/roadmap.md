@@ -39,6 +39,6 @@ mostrar; mobile depois do web validado.
 
 ## Próxima ação concreta
 
-Fatia 9 (deploy em produção) em andamento. Próximo passo: reexecutar o CI com
-Trivy e confirmar a publicação das sete imagens no GHCR antes de
-criar os manifests Kubernetes da aplicação completa.
+Fatia 9 (deploy em produção) em andamento. As sete imagens já são publicadas
+no GHCR depois dos gates verdes. Próximo passo: definir persistência, segredos
+e recursos e criar os manifests Kubernetes da aplicação completa.
