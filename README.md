@@ -27,15 +27,12 @@ por IA (specs, ADRs, roadmap e tasks como fonte da verdade — ver abaixo).
 - **Identidade**: Keycloak (OAuth2/OIDC)
 - **Segredos**: HashiCorp Vault (entra em fase posterior)
 - **Observabilidade**: Prometheus, Grafana, OpenTelemetry
-- **Orquestração/deploy**: Docker Compose (dev e produção, dados/infra) +
-  [Kamal](https://kamal-deploy.org/) pros serviços de aplicação em produção
-  (zero-downtime, rollback automático — [ADR-0021](docs/architecture/adr/0021-deploy-kamal.md)).
-  **Não** usamos Kubernetes/Helm/Terraform/ArgoCD — produção é um servidor
-  Linux único do usuário, não um cluster ([ADR-0016](docs/architecture/adr/0016-topologia-producao-servidor-unico.md));
-  essas ferramentas viram evolução condicional, não padrão (ver `docs/roadmap.md` #9)
+- **Orquestração/deploy**: Docker Compose no desenvolvimento; K3s + Traefik
+  no servidor de produção e Argo CD para sincronização declarativa a partir
+  do repositório GitOps ([ADR-0030](docs/architecture/adr/0030-deploy-kubernetes-argocd.md))
 - **Ingress (produção)**: Cloudflare Tunnel, sem porta pública aberta ([ADR-0019](docs/architecture/adr/0019-ingress-cloudflare-tunnel.md))
-- **CI/CD**: GitHub Actions — CI em runner hospedado, deploy via runner
-  self-hosted no próprio servidor ([ADR-0020](docs/architecture/adr/0020-deploy-runner-self-hosted.md))
+- **CI/CD**: GitHub Actions em runner hospedado, imagens imutáveis no GHCR e
+  deploy GitOps pelo Argo CD ([ADR-0030](docs/architecture/adr/0030-deploy-kubernetes-argocd.md))
 - **IA**: agente orquestrador + RAG para interação em linguagem natural com
   o sistema (`ai-service`); provedor de LLM plugável por usuário (OpenAI ou
   Ollama, ver [ADR-0002](docs/architecture/adr/0002-abstracao-provedor-llm.md));
@@ -166,13 +163,14 @@ inalcançável de dentro do container). 52 testes, imagem Docker validada.
 Backlog completo (ver `docs/tasks.md`).
 
 Repositório no GitHub: [`wep1980/wepdev-financas`](https://github.com/wep1980/wepdev-financas)
-(privado). CI 100% verde — `mvn test` passa nos seis serviços Java e
+(privado). O CI executa `mvn test` nos seis serviços Java e
 `npm test` no `web`, todos no runner hospedado, cobertura publicada como
 artefato do run (JaCoCo nos serviços Java), a imagem Docker de cada um é
-validada a cada mudança (`docker build`, sem publicar em registry) e o
-scan de vulnerabilidade passa nos sete — OWASP Dependency-Check
+validada a cada mudança e, depois dos gates, publicada no GHCR. O scan de
+vulnerabilidade usa OWASP Dependency-Check
 (ADR-0017) nos serviços Java, `npm audit` no `web` (sem ferramenta Java
-lá, ver `security.md` seção 6) — com a `NVD_API_KEY` ativa (ver
+lá, ver `security.md` seção 6). O Dependency-Check usa o acesso público à
+NVD e cache compartilhado, sem API key do projeto (ver
 [`docs/architecture/security.md`](docs/architecture/security.md)). Ver
 [`docs/tasks.md`](docs/tasks.md) pro detalhe do que falta em cada item.
 

@@ -111,9 +111,8 @@ jobs:
         run: |
           ./mvnw package -B -DskipTests
           docker build -f src/main/docker/Dockerfile.jvm -t account-service:ci .
-      # Precisa de NVD_API_KEY (secret do repo) — sem ela o NVD rejeita a
-      # sincronização com "Invalid API Key" (validado localmente,
-      # 2026-08-07). Gerar de graça em https://nvd.nist.gov/developers/request-an-api-key.
+      # A base é compartilhada pelo cache para reduzir downloads e respeitar
+      # os limites públicos da NVD, sem depender de credencial do projeto.
       - name: Cache da base de dados do OWASP Dependency-Check
         uses: actions/cache@v6
         with:
@@ -121,7 +120,7 @@ jobs:
           key: dependency-check-data-${{ github.run_id }}
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+        run: ./mvnw dependency-check:check -B
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -175,7 +174,7 @@ jobs:
           key: dependency-check-data-${{ github.run_id }}
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+        run: ./mvnw dependency-check:check -B
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -229,7 +228,7 @@ jobs:
           key: dependency-check-data-${{ github.run_id }}
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+        run: ./mvnw dependency-check:check -B
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -283,7 +282,7 @@ jobs:
           key: dependency-check-data-${{ github.run_id }}
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+        run: ./mvnw dependency-check:check -B
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -337,7 +336,7 @@ jobs:
           key: dependency-check-data-${{ github.run_id }}
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+        run: ./mvnw dependency-check:check -B
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem
@@ -433,7 +432,7 @@ jobs:
           key: dependency-check-data-${{ github.run_id }}
           restore-keys: dependency-check-data-
       - name: Scan de vulnerabilidade (OWASP Dependency-Check)
-        run: ./mvnw dependency-check:check -B -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+        run: ./mvnw dependency-check:check -B
       - name: Publicar imagem no GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/publicar-imagem

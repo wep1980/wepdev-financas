@@ -11,6 +11,10 @@
 - [x] Registrar a substituição de runner self-hosted/Kamal por K3s + Argo CD (ADR-0030).
 - [x] Preservar os testes e scans existentes por serviço.
 - [x] Configurar publicação seletiva das sete imagens no GHCR em pushes na `main`.
+- [x] Corrigir a ausência de `services/web/public` no build da imagem Next.js.
+- [x] Atualizar `jackson-databind` para 2.22.2 nos seis serviços após o alerta CVE-2026-54515.
+- [x] Remover a dependência da API key da NVD e manter o scan com acesso público + cache.
+- [ ] Confirmar a publicação das sete imagens no GHCR após todos os gates verdes.
 - [ ] Criar credencial de escopo mínimo para abertura de PR no `servidor-gitops`.
 - [ ] Criar manifests Kubernetes dos sete serviços sem segredos versionados.
 - [ ] Definir persistência, backup e recursos para MySQL, MongoDB, Redis, Kafka, Qdrant e Keycloak.

@@ -39,7 +39,6 @@ mostrar; mobile depois do web validado.
 
 ## Próxima ação concreta
 
-Fatia 6 (front-end Next.js) entregue — scaffold, autenticação, shell, CRUD
-conta/transação/cartão, dashboard, upload de documento religado ao
-card-service, refinamento visual, chat com IA, CI/Docker Compose/diagramas
-(item 10, 2026-08-11). Próximo passo: fatia 7 (app React Native).
+Fatia 9 (deploy em produção) em andamento. Próximo passo: reexecutar o CI sem
+credencial da NVD e confirmar a publicação das sete imagens no GHCR antes de
+criar os manifests Kubernetes da aplicação completa.

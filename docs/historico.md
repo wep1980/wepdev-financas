@@ -4165,3 +4165,21 @@ GitHub, imagens imutáveis são publicadas no GHCR e o deploy passa a ser
 declarativo pelo GitOps/Argo CD. O CI existente foi preservado e estendido
 para publicar somente serviços alterados, sempre depois de testes e scans.
 Nenhum segredo ou acesso ao cluster foi adicionado ao repositório.
+
+Na primeira execução completa, os testes, o lint, a auditoria e o build
+Next.js passaram, mas a imagem do frontend falhou porque o Dockerfile copia
+`public/` e o diretório não existia. Adicionado `services/web/public/.gitkeep`
+para preservar o diretório esperado sem criar um asset artificial.
+
+O OWASP Dependency-Check também identificou `jackson-databind` 2.22.0 com
+CVE-2026-54515. Os seis serviços passaram a gerenciar explicitamente a versão
+2.22.2 antes do `quarkus-bom`; a árvore efetiva do Maven foi conferida para
+garantir que a correção prevalece sobre a versão 2.22.0 do Quarkus 3.38.1.
+O alerta CVE-2026-41115 de `kafka-clients` 4.2.1 não recebeu supressão: a
+Apache informa que a implementação está correta, que a correção foi
+documental e orienta revisar as ACLs. O gate continua inalterado em CVSS 7.
+
+A execução remota encontrou uma API key da NVD inválida. Por decisão do
+usuário, o workflow deixou de depender dessa credencial: o Dependency-Check
+continua ativo usando o acesso público e o cache do GitHub Actions. O gate de
+CVSS permanece inalterado.
