@@ -91,7 +91,7 @@ jobs:
       # jacoco:report já roda dentro de "mvn test" (bind na fase test, ver
       # pom.xml) — aqui só publica o HTML gerado como artefato do run.
       - name: Publicar relatório de cobertura (JaCoCo)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jacoco-report-account-service
           path: services/account-service/target/site/jacoco/
@@ -152,7 +152,7 @@ jobs:
       - name: Testes (unitário + integração)
         run: ./mvnw test -B
       - name: Publicar relatório de cobertura (JaCoCo)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jacoco-report-card-service
           path: services/card-service/target/site/jacoco/
@@ -206,7 +206,7 @@ jobs:
       - name: Testes (unitário + integração)
         run: ./mvnw test -B
       - name: Publicar relatório de cobertura (JaCoCo)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jacoco-report-document-service
           path: services/document-service/target/site/jacoco/
@@ -260,7 +260,7 @@ jobs:
       - name: Testes (unitário + integração)
         run: ./mvnw test -B
       - name: Publicar relatório de cobertura (JaCoCo)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jacoco-report-transaction-service
           path: services/transaction-service/target/site/jacoco/
@@ -314,7 +314,7 @@ jobs:
       - name: Testes (unitário + integração)
         run: ./mvnw test -B
       - name: Publicar relatório de cobertura (JaCoCo)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jacoco-report-ai-service
           path: services/ai-service/target/site/jacoco/
@@ -410,7 +410,7 @@ jobs:
       - name: Testes (unitário + integração)
         run: ./mvnw test -B
       - name: Publicar relatório de cobertura (JaCoCo)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jacoco-report-budget-service
           path: services/budget-service/target/site/jacoco/
