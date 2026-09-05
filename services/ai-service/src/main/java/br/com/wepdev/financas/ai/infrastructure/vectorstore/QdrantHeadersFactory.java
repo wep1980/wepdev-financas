@@ -5,25 +5,25 @@ import jakarta.ws.rs.core.MultivaluedMap;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.ext.ClientHeadersFactory;
 
+import java.util.Optional;
+
 @ApplicationScoped
 public class QdrantHeadersFactory implements ClientHeadersFactory {
 
     static final String API_KEY_HEADER = "api-key";
 
-    private final String apiKey;
+    private final Optional<String> apiKey;
 
     public QdrantHeadersFactory(
-            @ConfigProperty(name = "ai-service.qdrant.api-key") String apiKey) {
-        this.apiKey = apiKey;
+            @ConfigProperty(name = "ai-service.qdrant.api-key") Optional<String> apiKey) {
+        this.apiKey = apiKey.filter(valor -> !valor.isBlank());
     }
 
     @Override
     public MultivaluedMap<String, String> update(
             MultivaluedMap<String, String> incomingHeaders,
             MultivaluedMap<String, String> outgoingHeaders) {
-        if (!apiKey.isBlank()) {
-            outgoingHeaders.putSingle(API_KEY_HEADER, apiKey);
-        }
+        apiKey.ifPresent(valor -> outgoingHeaders.putSingle(API_KEY_HEADER, valor));
         return outgoingHeaders;
     }
 }
